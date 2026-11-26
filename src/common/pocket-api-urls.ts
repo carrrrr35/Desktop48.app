@@ -49,6 +49,8 @@ export const SMS_SEND_URL = `${ORIGIN}/user/api/v2/sms/send_sms`
 /** v2 手机验证码登录：来源 7.1.44 APK Retrofit 接口注解 */
 export const SMS_LOGIN_URL = `${ORIGIN}/user/api/v2/login/app/app_login`
 export const TOKEN_CHECK_URL = `${ORIGIN}/user/api/v1/user/info/reload`
+/** 已绑定主号 / 小号切换，来源：口袋48 7.1.45 APK 的账号管理流程。 */
+export const SWITCH_LINKED_ACCOUNT_URL = `${ORIGIN}/user/api/v1/bigsmall/switch/user`
 /** 口袋钱包余额：验证登录态时顺带展示，接口失败不影响登录态判定 */
 export const USER_MONEY_URL = `${ORIGIN}/user/api/v1/user/money`
 /** 每日签到（口袋 App 的「每日礼品」）：成功返回成长值 / 鸡腿 / 鸡翅奖励 */

@@ -14,6 +14,7 @@ import type { FeedbackInput, FeedbackMetaResponse } from '@common/feedback'
 import type { LiveDanmaku } from '@common/live-danmaku'
 import type { MemberFlag, MemberFlagKind } from '@common/member-flags'
 import type { MemberTeamPromotion } from '@common/member-team-promotion'
+import type { PocketAccountList } from '@common/pocket-accounts'
 import type { AllMemberItem, MemberDataContent, OfficialInfoItem, StarAdjunctItem, StarInfoItem } from '../main/data'
 import type { FfmpegProblem, FfmpegSource, FfmpegStatus } from '../main/ffmpeg/ffmpeg-process'
 import type { TaskSnapshot } from '../main/ffmpeg/task-registry'
@@ -664,6 +665,10 @@ interface StaticIpcInvokeMap {
   pocketLoginByToken: InvokeSpec<[token: string, mobile?: string], PocketAuthState>
   /** 当前登录态（读本地凭证，不做网络校验） */
   pocketGetAuthState: InvokeSpec<[], PocketAuthState>
+  /** 当前登录账号绑定的主号和小号；只返回展示资料 */
+  pocketGetLinkedAccounts: InvokeSpec<[], PocketAccountList>
+  /** 切换至当前账号绑定的身份，并返回新的脱敏登录态 */
+  pocketSwitchLinkedAccount: InvokeSpec<[userId: string], PocketAuthState>
   /** 退出登录：删除本地凭证 */
   pocketLogout: InvokeSpec<[], void>
   /** 取直播的聊天室 id（需登录，无 token 的详情接口拿不到）；未登录返回空串，过期 reject */
@@ -820,6 +825,7 @@ export type IpcEventMap = {
   openRoomFromTray: [userId: number]
   /** 登录凭证已因 token 失效被清除（对端：pocket-auth.ts），各窗镜像据此复位 */
   pocketAuthExpired: []
+  pocketAuthChanged: [state: PocketAuthState]
   /**
    * 更新状态变化（对端：main/updater/engine.ts）。
    * 状态归主进程所有、每个窗口各存镜像，因此广播给全部窗口（见 main/ipc/send.ts 的 broadcastIpc）。

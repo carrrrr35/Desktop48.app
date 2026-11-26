@@ -4,6 +4,7 @@ import type { InputInstance } from 'element-plus'
 import { POCKET_CLIENT_LABEL } from '@common/pocket-client-profile'
 import { Lock, User, WarningFilled } from '@element-plus/icons-vue'
 import { pocketAuthState } from '@renderer/stores/pocket-auth'
+import Tools from '@renderer/utils/tools'
 import { computed, ref } from 'vue'
 
 /**
@@ -35,6 +36,14 @@ const clientLabel = POCKET_CLIENT_LABEL
 const {
   avatarUrl,
   rowTitle,
+  accountDialogVisible,
+  linkedAccounts,
+  loadingAccounts,
+  accountListError,
+  switchingUserId,
+  openAccountDialog,
+  loadAccounts,
+  selectLinkedAccount,
   loginDialogVisible,
   loginTab,
   areaOptions,
@@ -130,6 +139,9 @@ function focusSmsMobile() {
           >
             签到
           </el-button>
+          <el-button @click="openAccountDialog">
+            切换账号
+          </el-button>
           <el-button
             type="danger"
             plain
@@ -148,6 +160,57 @@ function focusSmsMobile() {
       </div>
     </div>
   </section>
+
+  <el-dialog
+    v-model="accountDialogVisible"
+    title="切换口袋48账号"
+    width="min(440px, calc(100vw - 32px))"
+    align-center
+    class="setting-dialog"
+    append-to-body
+    :close-on-click-modal="!switchingUserId"
+    :close-on-press-escape="!switchingUserId"
+    :show-close="!switchingUserId"
+  >
+    <p v-if="loadingAccounts" class="account-switch-message" role="status">
+      正在读取账号…
+    </p>
+    <div v-else-if="accountListError" class="account-switch-message" role="alert">
+      <p>{{ accountListError }}</p>
+      <el-button @click="loadAccounts">
+        重试
+      </el-button>
+    </div>
+    <template v-else>
+      <ul v-if="linkedAccounts.accounts.length" class="account-switch-list">
+        <li v-for="item in linkedAccounts.accounts" :key="item.userId" class="account-switch-row">
+          <el-avatar :size="38" :src="Tools.sourceUrl(item.avatar) || undefined">
+            <el-icon><User /></el-icon>
+          </el-avatar>
+          <div class="account-switch-profile">
+            <strong>{{ item.nickname || `口袋用户 ${item.userId}` }}</strong>
+            <span>{{ item.isPrimary ? '主号' : '小号' }}</span>
+          </div>
+          <el-tag v-if="item.userId === linkedAccounts.activeUserId" type="success" size="small">
+            当前账号
+          </el-tag>
+          <el-button
+            v-else
+            size="small"
+            :loading="switchingUserId === item.userId"
+            :disabled="!!switchingUserId"
+            :aria-label="`切换到 ${item.nickname || item.userId}`"
+            @click="selectLinkedAccount(item.userId)"
+          >
+            切换
+          </el-button>
+        </li>
+      </ul>
+      <p v-if="linkedAccounts.accounts.length < 2" class="account-switch-message">
+        当前没有可切换的已绑定账号。
+      </p>
+    </template>
+  </el-dialog>
 
   <el-dialog
     v-model="loginDialogVisible"
@@ -415,6 +478,45 @@ function focusSmsMobile() {
 </template>
 
 <style scoped lang="scss">
+.account-switch-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.account-switch-profile {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    overflow-wrap: anywhere;
+  }
+
+  span {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.account-switch-message {
+  margin: 8px 0;
+  color: var(--el-text-color-secondary);
+}
+
 /* 品牌渐变主按钮已全局统一，见 app.scss */
 
 /* ===== 口袋48登录弹窗 ===== */

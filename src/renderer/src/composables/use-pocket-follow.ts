@@ -12,7 +12,7 @@
  * 任何一处触发同步，两处的状态与文案同步变化（与 stores/member-flags 同一设计）。
  */
 import { useFollowedMembersStore } from '@renderer/stores/member-flags'
-import { ensurePocketAuthState, pocketAuthErrorMessage } from '@renderer/stores/pocket-auth'
+import { ensurePocketAuthState, pocketAuthErrorMessage, pocketAuthState } from '@renderer/stores/pocket-auth'
 import { debugLog } from '@renderer/utils/debug'
 import { ref } from 'vue'
 
@@ -26,15 +26,24 @@ const syncAt = ref<number | null>(null)
 /** 上次失败原因；空串 = 无失败记录 */
 const syncError = ref('')
 
-/** 进行中的同步：并发触发共用同一个 promise，只发一次请求（模块级，跨页面共享） */
-let inflight: Promise<boolean> | null = null
+/** 同账号的并发同步共用一次请求。 */
+let inflight: { account: string, result: Promise<boolean> } | null = null
 
-async function run(): Promise<boolean> {
+function currentAccount(): string {
+  const { userId, savedAt, loggedIn } = pocketAuthState.value
+  return loggedIn ? `${userId}:${savedAt}` : ''
+}
+
+async function run(account: string): Promise<boolean> {
   syncing.value = true
   try {
     const ids = await window.mainAPI.pocketGetFollowedIds()
+    if (currentAccount() !== account)
+      return false
     syncPulled.value = ids.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0).length
     const total = await useFollowedMembersStore().mergeFromPocket(ids)
+    if (currentAccount() !== account)
+      return false
     syncTotal.value = total
     syncAt.value = Date.now()
     syncError.value = ''
@@ -42,12 +51,10 @@ async function run(): Promise<boolean> {
     return true
   }
   catch (error) {
-    syncError.value = pocketAuthErrorMessage(error)
+    if (currentAccount() === account)
+      syncError.value = pocketAuthErrorMessage(error)
     debugLog('pocket-follow', '同步失败', error)
     return false
-  }
-  finally {
-    syncing.value = false
   }
 }
 
@@ -59,10 +66,17 @@ export function usePocketFollowSync() {
   function sync(): Promise<boolean> {
     if (!ensurePocketAuthState().loggedIn)
       return Promise.resolve(false)
-    inflight ??= run().finally(() => {
-      inflight = null
+    const account = currentAccount()
+    if (inflight?.account === account)
+      return inflight.result
+    const result = run(account).finally(() => {
+      if (inflight?.result === result) {
+        inflight = null
+        syncing.value = false
+      }
     })
-    return inflight
+    inflight = { account, result }
+    return result
   }
 
   return {

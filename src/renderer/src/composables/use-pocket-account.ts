@@ -1,3 +1,4 @@
+import type { PocketAccountList } from '@common/pocket-accounts'
 import type { PocketVerifyResult } from '@preload/ipc-contract'
 import {
   loginByPastedToken,
@@ -7,6 +8,7 @@ import {
   pocketAuthErrorMessage,
   pocketAuthState,
   refreshPocketAuthState,
+  switchPocketAccount,
   verifyPocketLogin,
 } from '@renderer/stores/pocket-auth'
 import { debugLog } from '@renderer/utils/debug'
@@ -61,6 +63,57 @@ export function usePocketAccount(onLoginSuccess?: () => void) {
   const rowTitle = computed(() => {
     const s = pocketAuthState.value
     return s.loggedIn && s.nickname ? s.nickname : '口袋48账号'
+  })
+
+  const accountDialogVisible = ref(false)
+  const linkedAccounts = ref<PocketAccountList>({ activeUserId: '', accounts: [] })
+  const loadingAccounts = ref(false)
+  const accountListError = ref('')
+  const switchingUserId = ref('')
+
+  async function loadAccounts() {
+    if (loadingAccounts.value)
+      return
+    loadingAccounts.value = true
+    accountListError.value = ''
+    try {
+      linkedAccounts.value = await window.mainAPI.pocketGetLinkedAccounts()
+    }
+    catch (error) {
+      accountListError.value = pocketAuthErrorMessage(error)
+    }
+    finally {
+      loadingAccounts.value = false
+    }
+  }
+
+  function openAccountDialog() {
+    accountDialogVisible.value = true
+    linkedAccounts.value = { activeUserId: '', accounts: [] }
+    void loadAccounts()
+  }
+
+  async function selectLinkedAccount(userId: string) {
+    if (switchingUserId.value || userId === linkedAccounts.value.activeUserId)
+      return
+    switchingUserId.value = userId
+    try {
+      const state = await switchPocketAccount(userId)
+      linkedAccounts.value.activeUserId = state.userId
+      ElMessage.success(state.nickname ? `已切换到 ${state.nickname}` : '已切换账号')
+      onLoginSuccess?.()
+    }
+    catch (error) {
+      ElMessage.error(pocketAuthErrorMessage(error))
+    }
+    finally {
+      switchingUserId.value = ''
+    }
+  }
+
+  watch(() => pocketAuthState.value.loggedIn, (loggedIn) => {
+    if (!loggedIn)
+      accountDialogVisible.value = false
   })
 
   // ===== 登录弹窗 =====
@@ -348,6 +401,14 @@ export function usePocketAccount(onLoginSuccess?: () => void) {
     // 展示
     avatarUrl,
     rowTitle,
+    accountDialogVisible,
+    linkedAccounts,
+    loadingAccounts,
+    accountListError,
+    switchingUserId,
+    openAccountDialog,
+    loadAccounts,
+    selectLinkedAccount,
     // 登录弹窗
     loginDialogVisible,
     loginTab,

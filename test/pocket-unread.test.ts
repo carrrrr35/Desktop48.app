@@ -835,6 +835,53 @@ describe('pocket-unread（房间未读检测）', () => {
     expect(broadcasts).toEqual([])
   })
 
+  it('切号时丢弃旧轮询的预览，新一轮正常发布当前账号预览', async () => {
+    const { mod, auth } = await freshModule()
+    stubOnline(auth, lastOf('old'))
+    auth.getRoomMessages.mockResolvedValue(pageOf('m1'))
+    const discovery = Promise.withResolvers<unknown>()
+    auth.getServerChannels.mockReturnValueOnce(discovery.promise)
+
+    mod.startPocketUnread()
+    try {
+      await vi.waitFor(() => expect(auth.getServerChannels).toHaveBeenCalledTimes(1))
+      auth.getToken.mockReturnValue('new-account')
+      mod.clearAccountUnread()
+      // HTTP 层已经拒绝旧请求，轮询仍须丢弃此前收到的预览。
+      discovery.reject(new Error('登录状态已变更，请重试'))
+      await settle()
+      expect(mod.getState().previews).toEqual([])
+      expect(broadcasts.flatMap(state => state.previews ?? [])).toEqual([])
+    }
+    finally {
+      mod.stopPocketUnread()
+    }
+
+    auth.getRoomLastMessages.mockResolvedValue(lastOf('new').map(preview => ({ ...preview, msgContent: '新账号预览' })))
+    await runTick(auth, mod)
+    expect(mod.getState().previews).toMatchObject([{ msgContent: '新账号预览' }])
+  })
+
+  it('切号后到达的旧轮询消息不会重新建立已读水位', async () => {
+    const { mod, auth } = await freshModule()
+    stubOnline(auth, lastOf('old'))
+    const probe = Promise.withResolvers<ReturnType<typeof pageOf>>()
+    auth.getRoomMessages.mockReturnValueOnce(probe.promise)
+
+    mod.startPocketUnread()
+    try {
+      await vi.waitFor(() => expect(auth.getRoomMessages).toHaveBeenCalledTimes(1))
+      auth.getToken.mockReturnValue('new-account')
+      mod.clearAccountUnread()
+      probe.resolve(pageOf('old-message'))
+      await settle()
+      expect(await mod.markRead(1)).toBeNull()
+    }
+    finally {
+      mod.stopPocketUnread()
+    }
+  })
+
   it('取关成员：未读与水位一并清理并广播；重新关注后首见重新锚定', async () => {
     const { mod, auth } = await freshModule()
     stubOnline(auth, lastOf('k1'))

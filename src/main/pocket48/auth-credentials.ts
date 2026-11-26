@@ -105,7 +105,7 @@ export class AuthCredentialStore {
   }
 
   /** 保存新凭证；返回是否以系统加密落盘，false 表示明文降级 */
-  async save(profile: Profile, token: string): Promise<boolean> {
+  async save(profile: Profile, token: string, expectedToken?: string): Promise<boolean> {
     let available = false
     try {
       available = await this.cipher.isEncryptionAvailable()
@@ -116,6 +116,8 @@ export class AuthCredentialStore {
     // 探测成功但加密失败不静默降级：把错误交给登录流程，避免 token 以明文意外落盘
     const tokenEnc = available ? await this.cipher.encrypt(token) : ''
     const tokenPlain = available ? '' : token
+    if (expectedToken !== undefined && this.getToken() !== expectedToken)
+      throw new Error('登录状态已变更，请重试')
     this.file.write({ ...profile, tokenEnc, tokenPlain })
     this.plainToken = token
     return available

@@ -293,10 +293,18 @@ export function useLiveDanmaku(options: {
     }
   }
 
-  watch(
-    () => [options.roomId(), options.pocketRoomId?.() || '', options.enabled(), pocketAuthState.value.loggedIn] as const,
-    sync,
-  )
+  watch([
+    options.roomId,
+    () => options.pocketRoomId?.() || '',
+    options.enabled,
+    () => pocketAuthState.value.loggedIn,
+    () => pocketAuthState.value.userId,
+    () => pocketAuthState.value.savedAt,
+  ], ([, , , , userId, savedAt], [, , , , previousUserId, previousSavedAt]) => {
+    if (activePocketRoomId && (userId !== previousUserId || savedAt !== previousSavedAt))
+      stopPocket()
+    sync()
+  })
   // onScopeDispose 而非 onUnmounted：组件作用域与裸 effectScope 都能清理，便于直接单测
   onScopeDispose(stop)
 
