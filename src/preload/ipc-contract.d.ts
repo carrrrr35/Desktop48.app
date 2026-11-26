@@ -41,6 +41,31 @@ export interface NetResponse {
   headers: Record<string, string>
 }
 
+export interface PocketConversation {
+  id: string
+  targetUserId: string
+  name: string
+  avatar: string
+  preview: string
+  timestamp: number
+  unreadCount: number
+}
+
+export interface PocketDirectMessage {
+  id: string
+  senderId: string
+  senderName: string
+  senderIsClub: boolean
+  text: string
+  image: string
+  timestamp: number
+}
+
+export interface PocketMessagePage<T> {
+  items: T[]
+  lastTime: number
+}
+
 // 网络诊断结果随契约一起暴露（渲染端设置页诊断列表消费）
 export type { NetDiagnoseItem }
 
@@ -670,6 +695,8 @@ interface StaticIpcInvokeMap {
   pocketCheckIn: InvokeSpec<[], PocketCheckInResult>
   /** 拉取账号关注成员 ID 列表（只给 ID，详情由本地成员树解析）；未登录空数组，过期 reject */
   pocketGetFollowedIds: InvokeSpec<[], number[]>
+  pocketGetConversations: InvokeSpec<[lastTime?: number], PocketMessagePage<PocketConversation>>
+  pocketGetConversationMessages: InvokeSpec<[targetUserId: string, lastTime?: number], PocketMessagePage<PocketDirectMessage>>
   /** 关注成员（桌面端 toggle 双写）；失败 reject，调用方静默降级 */
   pocketFollowMember: InvokeSpec<[userId: number], void>
   /** 取消关注成员（桌面端 toggle 双写）；失败 reject，调用方静默降级 */

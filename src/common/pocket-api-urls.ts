@@ -61,6 +61,10 @@ export const FRIENDS_IDS_URL = `${ORIGIN}/user/api/v1/friendships/friends/id`
 export const FRIEND_ADD_URL = `${ORIGIN}/user/api/v2/friendships/friends/add`
 export const FRIEND_REMOVE_URL = `${ORIGIN}/user/api/v2/friendships/friends/remove`
 
+// 消息盒子「消息」页签的会话列表与聊天记录（口袋48 Android 7.1.45）。
+export const MESSAGE_CONVERSATIONS_URL = `${ORIGIN}/message/api/v1/user/message/list`
+export const MESSAGE_HISTORY_URL = `${ORIGIN}/message/api/v1/user/message/info`
+
 // ===== IM 凭据与成员房间（主进程 pocket-auth 调用） =====
 
 /** 网易云信 IM 凭据（直播聊天室连接用）：需登录 token，额外带 P-Sign-Type 头 */

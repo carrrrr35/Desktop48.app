@@ -9,6 +9,7 @@ const Albums = () => import('./pages/Albums.vue')
 const Elections = () => import('./pages/Elections.vue')
 const Lives = () => import('./pages/Lives.vue')
 const Members = () => import('./pages/Members.vue')
+const Messages = () => import('./pages/Messages.vue')
 const Playbacks = () => import('./pages/Playbacks.vue')
 const Rooms = () => import('./pages/Rooms.vue')
 const Setting = () => import('./pages/Setting.vue')
@@ -22,6 +23,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/rooms',
     component: Rooms,
+  },
+  {
+    path: '/messages',
+    component: Messages,
   },
   {
     path: '/lives/playbacks',
