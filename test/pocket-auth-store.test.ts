@@ -122,4 +122,10 @@ describe('pocket-auth store / 错误提示', () => {
     const error = new Error(`Error invoking remote method 'pocketCheckIn': Error: 网络请求超时`)
     expect(store.pocketAuthErrorMessage(error)).toBe('网络请求超时')
   })
+
+  it('消息回包格式异常时只显示易读的错误提示', async () => {
+    const { store } = await setup(ACCOUNT_A)
+    const error = new Error(`Error invoking remote method 'pocketGetConversations': TypeError: 消息列表数据格式异常`)
+    expect(store.pocketAuthErrorMessage(error)).toBe('消息列表数据格式异常')
+  })
 })

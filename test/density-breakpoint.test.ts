@@ -23,6 +23,7 @@ const WIDTH_BREAKPOINTS = [
   'components/rooms/RoomListItem.vue:960px',
   'pages/Lives.vue:680px',
   'pages/Lives.vue:760px',
+  'pages/Messages.vue:620px',
   'pages/Rooms.vue:960px',
   'pages/Setting.vue:1000px',
 ]

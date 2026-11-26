@@ -65,6 +65,9 @@ export type {
   PocketRoomSenderProfile,
 } from './pocket-im'
 
+// ===== 消息盒子 =====
+export { getConversationMessages, getConversations } from './pocket-message-api'
+
 // ===== 房间 =====
 export {
   checkRoomAnswer,

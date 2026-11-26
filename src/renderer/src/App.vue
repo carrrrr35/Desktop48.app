@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ComponentInternalInstance, ComponentPublicInstance } from 'vue'
-import { ChatDotRound, Headset, Microphone, Setting, Trophy, User, VideoCamera } from '@element-plus/icons-vue'
+import { ChatDotRound, Headset, Message, Microphone, Setting, Trophy, User, VideoCamera } from '@element-plus/icons-vue'
 import AppDock from '@renderer/components/app/AppDock.vue'
 import AppTitleBar from '@renderer/components/app/AppTitleBar.vue'
 import BackTopButton from '@renderer/components/app/BackTopButton.vue'
@@ -72,6 +72,7 @@ window.mainAPI.openRoomFromTray((userId) => {
 const dockItems = computed(() => [
   { index: Constants.Menu.LIVES, label: '直播', icon: VideoCamera, color: 'var(--color-lives)' },
   { index: Constants.Menu.ROOMS, label: '房间', icon: ChatDotRound, color: 'var(--color-rooms)', badge: totalUnread.value || undefined },
+  { index: Constants.Menu.MESSAGES, label: '消息', icon: Message, color: 'var(--color-messages)' },
   { index: Constants.Menu.SHOWS, label: '公演', icon: Microphone, color: 'var(--color-shows)' },
   { index: Constants.Menu.ALBUMS, label: '专辑', icon: Headset, color: 'var(--color-albums)' },
   { index: Constants.Menu.MEMBERS, label: '成员', icon: User, color: 'var(--color-members)' },

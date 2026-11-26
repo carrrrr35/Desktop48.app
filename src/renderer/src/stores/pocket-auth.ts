@@ -34,7 +34,7 @@ if (typeof window !== 'undefined') {
 }
 
 /** 旧凭证可能没有 userId，保留脱敏资料作为兜底。 */
-function accountKey(state: PocketAuthState): string {
+export function pocketAccountKey(state: PocketAuthState): string {
   const identity = state.userId || `${state.mobileMasked}|${state.nickname}`
   return `${state.loggedIn}|${identity}|${state.savedAt}`
 }
@@ -45,7 +45,7 @@ function accountKey(state: PocketAuthState): string {
  * 消息列表接口不带暗号，渲染层这道锁是唯一防线。
  */
 function applyAuthState(next: PocketAuthState): void {
-  if (accountKey(next) !== accountKey(pocketAuthState.value)) {
+  if (pocketAccountKey(next) !== pocketAccountKey(pocketAuthState.value)) {
     authRevision++
     clearSmallRoomUnlocks()
   }
@@ -126,7 +126,7 @@ export function checkInPocket(): Promise<PocketCheckInResult> {
  */
 export function pocketAuthErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
-  const ipcMatch = /Error invoking remote method '[^']+': Error: (.*)/s.exec(text)
+  const ipcMatch = /^Error invoking remote method '[^']+': \w*Error: (.*)/s.exec(text)
   const message = (ipcMatch?.[1] ?? text.replace(/^Error:\s*/, '')).trim()
   if (message.includes('今日已领取') || message.includes('今日已签到'))
     return '今日已领取，明天再来'

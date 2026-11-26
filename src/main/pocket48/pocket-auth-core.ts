@@ -250,6 +250,7 @@ export async function postPocket<T>(
   data: object,
   token?: string,
   extraHeaders?: Record<string, string>,
+  reviver?: Parameters<typeof JSON.parse>[1],
 ): Promise<PocketEnvelope<T>> {
   // 已登录请求可能在切换账号后才返回，旧回包不能再更新资料或清除新凭证。
   const usesActiveSession = !!token && getToken() === token
@@ -305,7 +306,7 @@ export async function postPocket<T>(
           return
         }
         try {
-          const envelope = JSON.parse(body) as PocketEnvelope<T>
+          const envelope = JSON.parse(body, reviver) as PocketEnvelope<T>
           // debug(`[pocket-auth] ← POST ${apiPath} HTTP ${status} ${(performance.now() - startedAt).toFixed(1)}ms`, summarizeEnvelope(envelope))
           resolve(envelope)
         }
