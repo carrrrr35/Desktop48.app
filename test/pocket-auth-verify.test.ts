@@ -7,6 +7,7 @@ import {
   followMember,
   getAuthState,
   getFollowedIds,
+  getLinkedAccounts,
   getRoomChannel,
   getRoomLastMessages,
   getRoomMessages,
@@ -18,6 +19,7 @@ import {
   MASTER_PASSCODE,
   resetRoomSenderProfile,
   sendSms,
+  switchLinkedAccount,
   unfollowMember,
   verifyLogin,
 } from '../src/main/pocket48/pocket-auth'
@@ -107,7 +109,12 @@ vi.mock('electron', () => {
 vi.mock('../src/main/safe-json-file-sync', () => ({
   SafeJSONFileSync: class {
     read() { return env.stored }
-    write(data: Record<string, unknown>) { env.written = data }
+    write(data: Record<string, unknown>) {
+      env.stored = data
+      env.written = data
+    }
+
+    remove() { env.stored = null }
   },
 }))
 
@@ -163,12 +170,12 @@ function defaultReplies() {
 beforeEach(async () => {
   env.requests.length = 0
   env.written = null
-  env.stored = { ...STORED }
   env.replies = defaultReplies()
   // 发言资料是模块级缓存：别让上一例的结果漏到下一例
   resetRoomSenderProfile()
   // 明文 token 是模块级缓存：先清再按本例的 env.stored 重新载入
   logout()
+  env.stored = { ...STORED }
   await ensureAuthLoaded()
   loggerMock.debug.mockClear()
 })
@@ -294,6 +301,58 @@ describe('pocket-auth verifyLogin', () => {
     expect(state.loggedIn).toBe(true)
     expect(state.savedAt).toBe(STORED.savedAt)
     expect(state.mobileMasked).toBe('138****8000')
+  })
+})
+
+describe('pocket-auth 主号和小号切换', () => {
+  const links = {
+    bigUserInfo: { userId: 10001, nickname: '主号' },
+    smallUserInfo: [{ userId: 10002, nickname: '小号' }],
+  }
+
+  function profile(userId: number) {
+    return { status: 200, success: true, content: { userId, token: 'profile-token', bigSmallInfo: links } }
+  }
+
+  it('列出已绑定账号，且只将展示信息交给渲染层', async () => {
+    env.replies['user/info/reload'] = { body: profile(10001) }
+    expect(await getLinkedAccounts()).toEqual({
+      activeUserId: '10001',
+      accounts: [
+        { userId: '10001', nickname: '主号', avatar: '', isPrimary: true },
+        { userId: '10002', nickname: '小号', avatar: '', isPrimary: false },
+      ],
+    })
+  })
+
+  it('保存目标账号的新会话，支持从小号切回主号', async () => {
+    env.replies['user/info/reload'] = { body: profile(10001) }
+    env.replies['bigsmall/switch/user'] = {
+      body: { status: 200, success: true, content: { userId: 10002, token: 'small-token' } },
+    }
+    expect(await switchLinkedAccount('10002')).toMatchObject({ loggedIn: true, userId: '10002', nickname: '小号' })
+    expect(env.requests.at(-1)?.body).toEqual({ toUserId: 10002, token: 'test-token' })
+    expect(env.written).toMatchObject({ userId: '10002', tokenPlain: 'small-token' })
+
+    env.replies['user/info/reload'] = { body: profile(10002) }
+    env.replies['bigsmall/switch/user'] = {
+      body: { status: 200, success: true, content: { userId: 10001, token: 'main-token' } },
+    }
+    expect(await switchLinkedAccount('10001')).toMatchObject({ userId: '10001', nickname: '主号' })
+    expect(env.requests.at(-1)?.body).toEqual({ toUserId: 10001, token: 'small-token' })
+  })
+
+  it('拒绝未绑定账号和身份不匹配的回包，并保留当前会话', async () => {
+    env.replies['user/info/reload'] = { body: profile(10001) }
+    await expect(switchLinkedAccount('12345')).rejects.toThrow('未绑定')
+    expect(env.requests).toHaveLength(1)
+
+    env.replies['bigsmall/switch/user'] = {
+      body: { status: 200, success: true, content: { userId: 12345, token: 'unexpected-token' } },
+    }
+    await expect(switchLinkedAccount('10002')).rejects.toThrow('切换结果不完整')
+    expect(env.written).toBeNull()
+    expect(getAuthState().userId).toBe('10001')
   })
 })
 

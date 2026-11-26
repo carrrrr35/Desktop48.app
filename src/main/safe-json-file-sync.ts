@@ -1,4 +1,4 @@
-import { closeSync, copyFileSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { log } from './logger'
 
@@ -53,6 +53,13 @@ export class SafeJSONFileSync<T> {
       }
     }
     return null
+  }
+
+  /** 主动删除时先移除备份，避免下次读取恢复已删除的数据。 */
+  public remove(): void {
+    rmSync(this.bakFile, { force: true })
+    rmSync(this.filePath, { force: true })
+    this.restoredFromBak = false
   }
 
   public write(data: T): void {

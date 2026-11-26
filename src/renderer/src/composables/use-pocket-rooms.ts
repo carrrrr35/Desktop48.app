@@ -1928,13 +1928,19 @@ export function usePocketRooms() {
     })
   }
 
-  // 登录态变化（在设置页登录/退出后回到本页）：重新首灌；退出即撤回连接授权并退订
-  watch(loggedIn, (value) => {
-    if (!value) {
+  // 退出或切换账号时撤销上一账号的订阅和页面数据。
+  watch([loggedIn, () => pocketAuthState.value.userId, () => pocketAuthState.value.savedAt], ([value], [wasLoggedIn]) => {
+    if (wasLoggedIn) {
       qchatOptIn.value = false
+      rooms.value = []
+      pocketFollowIds.value = new Set()
+      selectedUserId.value = null
+      temporaryRoom.value = null
+      clearChat()
       void syncQChatChannel()
     }
-    void load()
+    if (value || wasLoggedIn)
+      void load()
   })
 
   // 切换消息范围：接口按范围过滤，只能重拉当前频道最近一页（未选中时切了也无需动作）。

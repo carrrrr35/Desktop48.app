@@ -19,7 +19,6 @@ import type { PocketClientProfileId } from '@common/pocket-client-profile'
  */
 import type { StoredAuth } from './auth-credentials'
 import { Buffer } from 'node:buffer'
-import fs from 'node:fs'
 import path from 'node:path'
 import { resolvePocketClientProfile } from '@common/pocket-client-profile'
 import { app, net, safeStorage } from 'electron'
@@ -72,10 +71,8 @@ export const credentials = new AuthCredentialStore(
     read: () => authStore().read(),
     write: auth => authStore().write(auth),
     remove: () => {
-      const file = authFilePath()
       try {
-        if (fs.existsSync(file))
-          fs.unlinkSync(file)
+        authStore().remove()
       }
       catch (error) {
         log('[pocket-auth] 删除凭证失败', error)
@@ -272,8 +269,12 @@ export async function postPocket<T>(
   extraHeaders?: Record<string, string>,
   profileId?: PocketClientProfileId,
 ): Promise<PocketEnvelope<T>> {
+  // 已登录请求可能在切换账号后才返回，旧回包不能再更新资料或清除新凭证。
+  const usesActiveSession = !!token && getToken() === token
   // pa 每次请求现算（内嵌当下时间戳）；wasm 加载失败时退回静态值，不影响请求发出
   await ensurePaWasm()
+  if (usesActiveSession && getToken() !== token)
+    throw new Error('登录状态已变更，请重试')
   const pa = currentPa(POCKET_PA)
   const startedAt = performance.now()
   const apiPath = logPath(url)
@@ -310,6 +311,10 @@ export async function postPocket<T>(
           return
         settled = true
         clearTimeout(timer)
+        if (usesActiveSession && getToken() !== token) {
+          reject(new Error('登录状态已变更，请重试'))
+          return
+        }
         const status = response.statusCode
         const body = Buffer.concat(chunks).toString('utf8')
         if (status < 200 || status >= 300) {
@@ -390,6 +395,7 @@ export async function saveAuth(
   info: PocketUserInfo,
   area: string,
   clientProfile: PocketClientProfileId,
+  expectedToken?: string,
 ): Promise<void> {
   const encrypted = await credentials.save({
     mobile,
@@ -399,7 +405,9 @@ export async function saveAuth(
     avatar: info.avatar,
     userId: info.userId,
     savedAt: Date.now(),
-  }, token)
+  }, token, expectedToken)
+  if (expectedToken !== undefined)
+    resetSessionCaches()
   log(`[pocket-auth] 凭证已保存（${encrypted ? '加密' : '明文降级'}，档位 ${clientProfile}），用户: ${info.nickname || '未知'}`)
 }
 

@@ -155,6 +155,8 @@ let timer: NodeJS.Timeout | null = null
 let ticking = false
 /** start 时上一轮还没结束：等它释放护栏后立即补跑，而不是落到下一个 60s 定时器 */
 let startRequested = false
+/** 清空账号状态时作废上一账号尚未完成的轮询和水位写回。 */
+let accountRevision = 0
 /**
  * 各频道上一次探测时刻（仅本进程内）：房间数超过每轮名额时按它轮转，先挑最久没查的。
  * 重启后为空 = 全部视为最久没查，先来先服务。
@@ -305,22 +307,29 @@ function missingChannelIds(userIds: number[]): number[] {
  * 按 TTL 重试。touched = 是否写过缓存（调用方据此落盘）。
  */
 async function resolveMissingChannels(missing: number[]): Promise<{ failed: number, firstError: unknown, touched: boolean }> {
+  const revision = accountRevision
   const data = store()
   let failed = 0
   let firstError: unknown = null
   let touched = false
   await mapWithConcurrency(missing, RESOLVE_CONCURRENCY, async (userId) => {
+    if (revision !== accountRevision)
+      return
     const key = String(userId)
     // 并发窗口内可能已被同批解析填上，回包后按 key 复核，不覆盖新结果
     if (data.channels[key] && data.channels[key].channelId)
       return
     try {
       const channel = await getRoomChannel(userId)
+      if (revision !== accountRevision)
+        return
       debug('[pocket-unread] 频道解析成功', userId, '->', channel.serverId, channel.channelId)
       data.channels[key] = { ...channel, resolvedAt: Date.now() }
       touched = true
     }
     catch (error) {
+      if (revision !== accountRevision)
+        return
       // token 失效上抛：调用方整轮/整页放弃；其余失败记空占位，按 TTL 再试
       if (error instanceof Error && error.message.includes('登录已过期'))
         throw error
@@ -405,6 +414,7 @@ async function healChannelOwners(
   attributedChannelIds: Set<string>,
   followedIds: number[],
 ): Promise<{ changed: boolean, closedChanged: boolean }> {
+  const revision = accountRevision
   const data = store()
   const now = Date.now()
   const unknown = [...new Set(lastMessages.map(item => item.channelId).filter(cid => cid && !attributedChannelIds.has(cid)))]
@@ -430,8 +440,12 @@ async function healChannelOwners(
   let dirty = false
   let closedChanged = false
   await mapWithConcurrency(toResolve, RESOLVE_CONCURRENCY, async (channelId) => {
+    if (revision !== accountRevision)
+      return
     try {
       const info = await getRoomChannelOwner(channelId)
+      if (revision !== accountRevision)
+        return
       // 复核时房间已重开：关闭集合里的旧记录作废，渲染层标记随快照消失
       if (closedChannels.delete(channelId))
         closedChanged = true
@@ -459,6 +473,8 @@ async function healChannelOwners(
       }
     }
     catch (error) {
+      if (revision !== accountRevision)
+        return
       // token 失效上抛：整轮放弃
       if (error instanceof Error && error.message.includes('登录已过期'))
         throw error
@@ -522,6 +538,7 @@ async function healChannelOwners(
  * 返回是否有结构变化。
  */
 async function discoverSmallChannels(targets?: number[], force = false): Promise<boolean> {
+  const revision = accountRevision
   const data = store()
   const now = Date.now()
   const ownerCountByServer = new Map<string, number>()
@@ -560,6 +577,8 @@ async function discoverSmallChannels(targets?: number[], force = false): Promise
   let dirty = false
   let hits = 0
   await mapWithConcurrency(entries, SMALL_DISCOVER_CONCURRENCY, async ([userId, channel]) => {
+    if (revision !== accountRevision)
+      return
     const { serverId } = channel
     smallDiscoverAt.set(serverId, Date.now())
     try {
@@ -582,6 +601,8 @@ async function discoverSmallChannels(targets?: number[], force = false): Promise
       }
       let found = ''
       for (const candidate of list) {
+        if (revision !== accountRevision)
+          return
         if (!candidate.channelId || candidate.channelId === channel.channelId)
           continue
         try {
@@ -602,6 +623,8 @@ async function discoverSmallChannels(targets?: number[], force = false): Promise
           debug('[pocket-unread] 候选不可用（跳过）', candidate.channelId, candidate.channelName || '无名字', message.slice(0, 80))
         }
       }
+      if (revision !== accountRevision)
+        return
       if (!found) {
         // 旧频道已不在 server 的频道列表里 = 确实被删了。房主「只删不建」时它
         // 也不再出现在 lastMsgList 里，探测永远等不到「频道不存在」，只能靠这里作废。
@@ -632,6 +655,8 @@ async function discoverSmallChannels(targets?: number[], force = false): Promise
       debug('[pocket-unread] 小房间主动发现', userId, ':', previous || '-', '->', found)
     }
     catch (error) {
+      if (revision !== accountRevision)
+        return
       if (error instanceof Error && error.message.includes('登录已过期'))
         throw error
       log('[pocket-unread] 小房间主动发现失败（下轮重试）', userId, serverId, error)
@@ -813,12 +838,17 @@ interface ProbeCandidate {
  * 被挤掉的频道本轮不推进触发锚，下一轮仍是「有更新」，不会漏。
  */
 async function probeChannels(candidates: ProbeCandidate[]): Promise<boolean> {
+  const revision = accountRevision
   const data = store()
   let dirty = false
   await mapWithConcurrency(candidates, PROBE_CONCURRENCY, async ({ channelId, serverId, previewKey }) => {
+    if (revision !== accountRevision)
+      return
     lastProbeAt.set(channelId, Date.now())
     try {
       const { messages } = await getRoomMessages(channelId, serverId, 0, 'member')
+      if (revision !== accountRevision)
+        return
       if (clearChannelFailure(channelId))
         dirty = true
       const list = countableMessages(messages)
@@ -844,6 +874,8 @@ async function probeChannels(candidates: ProbeCandidate[]): Promise<boolean> {
       dirty = true
     }
     catch (error) {
+      if (revision !== accountRevision)
+        return
       // token 失效上抛：整轮放弃；其余失败不推进触发锚，下一轮重试同一频道
       if (error instanceof Error && error.message.includes('登录已过期'))
         throw error
@@ -906,10 +938,11 @@ function sameSnapshot(a: Record<string, UnreadRoomState>, b: Record<string, Unre
 
 /**
  * 清空账号相关未读（未读/水位/触发锚），有变化则落盘 + 广播归零。
- * 登出与 token 失效即刻调用；频道缓存与账号无关，保留。
+ * 切号、登出与 token 失效即刻调用；频道缓存与账号无关，保留。
  * 重登后无旧锚，走首见锚定不补登出前消息。
  */
 export function clearAccountUnread(): void {
+  accountRevision++
   const data = store()
   const hadUnread = Object.keys(data.unread).length > 0
   const hadPreviews = latestPreviews.length > 0
@@ -924,6 +957,7 @@ export function clearAccountUnread(): void {
   latestPreviews = []
   alignPending.clear()
   lastProbeAt.clear()
+  smallDiscoverAt.clear()
   if (hadAccountState)
     persist()
   // 预览不持久化（重启由首轮检测重建），但渲染层镜像必须收到清空广播；
@@ -937,6 +971,7 @@ async function tick(): Promise<void> {
   if (ticking)
     return
   ticking = true
+  const revision = accountRevision
   try {
     const data = store()
 
@@ -951,6 +986,8 @@ async function tick(): Promise<void> {
     // 剔除后 ensureChannels 会顺带清掉它们的频道缓存与未读，走的正是「取关清理」那条路径。
     const blockedIds = new Set(Database.instance().getMemberFlagIds('blocked'))
     const pocketIds = await getFollowedIds()
+    if (revision !== accountRevision)
+      return
     const localIds = Database.instance().getMemberFlagIds('followed')
     const followedIds = mergeFollowedIds(pocketIds, localIds, id => blockedIds.has(id)).ids
     // 口袋关注与本地关注不是同一份名单：渲染层房间页按两者并集建，这里必须同口径，
@@ -971,6 +1008,8 @@ async function tick(): Promise<void> {
       localOnly.length ? `；仅本地关注 ${localOnly.length} 人：${localOnly.join(',')}` : '',
     )
     const { dirty: channelDirty, unreadChanged: unfollowChanged } = await ensureChannels(followedIds)
+    if (revision !== accountRevision)
+      return
     let dirty = channelDirty
 
     // serverId 去重（同一 team server 下多个成员频道）；channelId → userId 反查
@@ -1012,6 +1051,8 @@ async function tick(): Promise<void> {
     // 批量预览：一次请求覆盖全部关注房间，只为判断「哪个频道有新消息」。
     // 首见（还没有触发锚）/ 身份键变化 / 上次 markRead 对齐失败 → 进本轮探测队列
     const lastMessages = await getRoomLastMessages([...serverIds])
+    if (revision !== accountRevision)
+      return
     debug('[pocket-unread] lastMsgList 回包', lastMessages.length, '条')
     const pending = new Map<string, ProbeCandidate>()
     for (const item of lastMessages) {
@@ -1064,6 +1105,8 @@ async function tick(): Promise<void> {
       debug('[pocket-unread] 本轮房间超出名额，顺延下一轮：', pending.size, '->', probes.length)
     if (probes.length && await probeChannels(probes))
       dirty = true
+    if (revision !== accountRevision)
+      return
 
     // 校对归属：旧频道只要还能读历史消息，探测就不会失败，失败自愈永远等不到。
     // 补探本就是低频路径（多数轮次 0~1 个频道），一次 jump 换掉永久错挂的角标很划算。
@@ -1074,18 +1117,22 @@ async function tick(): Promise<void> {
         return
       const before = data.channels[ownerKey]
       try {
-        reconcileRoomChannel(Number(ownerKey), await getRoomChannel(Number(ownerKey)))
+        const channel = await getRoomChannel(Number(ownerKey))
+        if (revision === accountRevision)
+          reconcileRoomChannel(Number(ownerKey), channel)
       }
       catch (error) {
         debug('[pocket-unread] 补探频道归属校对失败（下一轮再试）', channelId, error)
       }
       // 补探已尝试校验归属：无变化 / 失败时 reconcile 不碰 resolvedAt，这里原地推后，
       // 免得本轮定期复核再为该成员打一次 jump（换房/关闭时 reconcile 已写入新条目，跳过）
-      if (before && data.channels[ownerKey] === before) {
+      if (revision === accountRevision && before && data.channels[ownerKey] === before) {
         before.resolvedAt = Date.now()
         dirty = true
       }
     }))
+    if (revision !== accountRevision)
+      return
 
     // 有效频道定期复核归属：成员换房后旧频道若没有未读，stale 补探永远轮不到它，缓存终生不校正。
     // 每轮只复核最久未复核的几个，失败保留缓存并把 resolvedAt 顺延到 TTL 之后，不形成重试风暴。
@@ -1096,27 +1143,35 @@ async function tick(): Promise<void> {
       .slice(0, CHANNEL_RECHECK_PER_TICK)
     await Promise.all(rechecks.map(async ([userId, channel]) => {
       try {
-        reconcileRoomChannel(Number(userId), await getRoomChannel(Number(userId)))
+        const updated = await getRoomChannel(Number(userId))
+        if (revision === accountRevision)
+          reconcileRoomChannel(Number(userId), updated)
       }
       catch (error) {
         debug('[pocket-unread] 频道归属定期复核失败（按 TTL 再试）', userId, error)
       }
       // 复核结果无变化时 reconcile 不会碰 resolvedAt：原地推后，避免同一批成员每轮重试
-      if (data.channels[userId] === channel) {
+      if (revision === accountRevision && data.channels[userId] === channel) {
         channel.resolvedAt = Date.now()
         dirty = true
       }
     }))
+    if (revision !== accountRevision)
+      return
 
     // 归属补全先于聚合：heal 处理 lastMsgList 里出现的未登记频道；discover 枚举频道列表，
     // 补上「还没人说话、所以不在 lastMsgList 里」的新建小房间。两者都可能改变成员→频道归属
     const healed = await healChannelOwners(lastMessages, new Set(channelOwner.keys()), followedIds)
+    if (revision !== accountRevision)
+      return
     if (healed.changed)
       dirty = true
     // 关闭频道集合与未读计数无关，需单独触发快照广播
     const closedChanged = healed.closedChanged
     if (await discoverSmallChannels())
       dirty = true
+    if (revision !== accountRevision)
+      return
 
     // 按成员聚合（大房间 + 小房间都记在成员头上）并与旧快照比对
     let unreadChanged = false
@@ -1196,9 +1251,12 @@ export async function getRoomChannelsBatch(userIds: number[]): Promise<Array<{ u
  * 免得刚读过的消息被当成未读复活（挂起期间该频道不计数，最多损失一论的消息）。
  */
 async function alignReadMark(channel: StoredChannel): Promise<void> {
+  const revision = accountRevision
   const data = store()
   try {
     const { messages } = await getRoomMessages(channel.channelId, channel.serverId, 0, 'member')
+    if (revision !== accountRevision)
+      return
     const newest = countableMessages(messages)[0]
     if (newest) {
       data.readMarks[channel.channelId] = { msgTime: newest.msgTime, msgIdServer: newest.msgIdServer }
@@ -1212,6 +1270,8 @@ async function alignReadMark(channel: StoredChannel): Promise<void> {
     debug('[pocket-unread] 已读水位对齐完成', channel.channelId, '=', newest?.msgTime ?? '-')
   }
   catch (error) {
+    if (revision !== accountRevision)
+      return
     if (error instanceof Error && error.message.includes('登录已过期'))
       throw error
     // 频道已删除（小房间被房主更新）：作废归属，别把水位对齐挂在死频道上反复重试

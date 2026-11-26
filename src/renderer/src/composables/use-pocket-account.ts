@@ -1,3 +1,4 @@
+import type { PocketAccountList } from '@common/pocket-accounts'
 import type { PocketClientProfileId, PocketVerifyResult } from '@preload/ipc-contract'
 import { DEFAULT_POCKET_CLIENT_PROFILE, POCKET_CLIENT_PROFILE_OPTIONS, pocketClientProfileOption } from '@common/pocket-client-profile'
 import {
@@ -8,6 +9,7 @@ import {
   pocketAuthErrorMessage,
   pocketAuthState,
   refreshPocketAuthState,
+  switchPocketAccount,
   verifyPocketLogin,
 } from '@renderer/stores/pocket-auth'
 import { debugLog } from '@renderer/utils/debug'
@@ -78,6 +80,57 @@ export function usePocketAccount(onLoginSuccess?: () => void) {
 
   /** 当前登录档位的说明（徽标悬停提示）：与登录弹窗里选中档位的 hint 同一口径 */
   const currentProfileHint = computed(() => pocketClientProfileOption(pocketAuthState.value.clientProfile).hint)
+
+  const accountDialogVisible = ref(false)
+  const linkedAccounts = ref<PocketAccountList>({ activeUserId: '', accounts: [] })
+  const loadingAccounts = ref(false)
+  const accountListError = ref('')
+  const switchingUserId = ref('')
+
+  async function loadAccounts() {
+    if (loadingAccounts.value)
+      return
+    loadingAccounts.value = true
+    accountListError.value = ''
+    try {
+      linkedAccounts.value = await window.mainAPI.pocketGetLinkedAccounts()
+    }
+    catch (error) {
+      accountListError.value = pocketAuthErrorMessage(error)
+    }
+    finally {
+      loadingAccounts.value = false
+    }
+  }
+
+  function openAccountDialog() {
+    accountDialogVisible.value = true
+    linkedAccounts.value = { activeUserId: '', accounts: [] }
+    void loadAccounts()
+  }
+
+  async function selectLinkedAccount(userId: string) {
+    if (switchingUserId.value || userId === linkedAccounts.value.activeUserId)
+      return
+    switchingUserId.value = userId
+    try {
+      const state = await switchPocketAccount(userId)
+      linkedAccounts.value.activeUserId = state.userId
+      ElMessage.success(state.nickname ? `已切换到 ${state.nickname}` : '已切换账号')
+      onLoginSuccess?.()
+    }
+    catch (error) {
+      ElMessage.error(pocketAuthErrorMessage(error))
+    }
+    finally {
+      switchingUserId.value = ''
+    }
+  }
+
+  watch(() => pocketAuthState.value.loggedIn, (loggedIn) => {
+    if (!loggedIn)
+      accountDialogVisible.value = false
+  })
 
   // ===== 登录弹窗 =====
 
@@ -378,6 +431,14 @@ export function usePocketAccount(onLoginSuccess?: () => void) {
     rowTitle,
     profileLabel,
     currentProfileHint,
+    accountDialogVisible,
+    linkedAccounts,
+    loadingAccounts,
+    accountListError,
+    switchingUserId,
+    openAccountDialog,
+    loadAccounts,
+    selectLinkedAccount,
     // 登录弹窗
     loginDialogVisible,
     loginTab,

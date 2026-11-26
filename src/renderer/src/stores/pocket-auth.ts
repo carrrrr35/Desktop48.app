@@ -25,20 +25,20 @@ const LOGGED_OUT: PocketAuthState = {
 /** 登录态快照；启动后由调用方（设置页）refresh 一次 */
 export const pocketAuthState = ref<PocketAuthState>({ ...LOGGED_OUT })
 
-// 主进程清失效凭证时广播（对端 pocket-auth.ts）：各窗镜像复位，两页登录态不分叉。
-// 可选调用兜底单测桩（stub 只提供 pocketGetAuthState / pocketLogout）
-if (typeof window !== 'undefined')
-  window.mainAPI.pocketAuthExpired?.(() => applyAuthState({ ...LOGGED_OUT }))
-
 /** 是否已拉取过一次登录态（避免未初始化时直播页误判未登录） */
 let initialized = false
+let authRevision = 0
 
-/**
- * 账号身份指纹：登录态里没有 userId，用「脱敏手机号 + 昵称 + 凭证保存时刻」当身份。
- * 退出走 LOGGED_OUT（savedAt=0）、换号手机号必变、同账号重登 savedAt 必变，三种都判得出。
- */
+// 切换以及凭证失效时同步所有窗口。
+if (typeof window !== 'undefined') {
+  window.mainAPI.pocketAuthExpired?.(() => applyAuthState({ ...LOGGED_OUT }))
+  window.mainAPI.pocketAuthChanged?.(applyAuthState)
+}
+
+/** 旧凭证可能没有 userId，保留脱敏资料作为兜底。 */
 function accountKey(state: PocketAuthState): string {
-  return `${state.mobileMasked}|${state.nickname}|${state.savedAt}`
+  const identity = state.userId || `${state.mobileMasked}|${state.nickname}`
+  return `${state.loggedIn}|${identity}|${state.savedAt}`
 }
 
 /**
@@ -47,16 +47,21 @@ function accountKey(state: PocketAuthState): string {
  * 消息列表接口不带暗号，渲染层这道锁是唯一防线。
  */
 function applyAuthState(next: PocketAuthState): void {
-  if (accountKey(next) !== accountKey(pocketAuthState.value))
+  if (accountKey(next) !== accountKey(pocketAuthState.value)) {
+    authRevision++
     clearSmallRoomUnlocks()
+  }
+  initialized = true
   pocketAuthState.value = next
 }
 
 /** 拉取当前登录态（读主进程本地凭证，无网络请求） */
 export async function refreshPocketAuthState(): Promise<PocketAuthState> {
+  const revision = authRevision
   try {
-    applyAuthState(await window.mainAPI.pocketGetAuthState())
-    initialized = true
+    const state = await window.mainAPI.pocketGetAuthState()
+    if (revision === authRevision)
+      applyAuthState(state)
   }
   catch (error) {
     console.error('[pocket-auth] 读取登录态失败:', error)
@@ -98,6 +103,12 @@ export async function loginByPastedToken(
 export async function logoutPocket(): Promise<void> {
   await window.mainAPI.pocketLogout()
   applyAuthState({ ...LOGGED_OUT })
+}
+
+export async function switchPocketAccount(userId: string): Promise<PocketAuthState> {
+  const state = await window.mainAPI.pocketSwitchLinkedAccount(userId)
+  applyAuthState(state)
+  return state
 }
 
 /**

@@ -41,9 +41,11 @@ export type {
 // ===== 登录会话 =====
 export {
   checkIn,
+  getLinkedAccounts,
   loginByCode,
   loginByToken,
   sendSms,
+  switchLinkedAccount,
   verifyLogin,
 } from './pocket-auth-session'
 export type {

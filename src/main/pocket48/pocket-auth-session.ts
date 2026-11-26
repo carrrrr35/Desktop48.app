@@ -9,15 +9,18 @@
  * 凭证读写与请求收窄全部在 pocket-auth-core.ts；本模块只负责登录流程编排。
  * 对外入口统一是 `./pocket-auth`（barrel），消费方不要直接引用本文件。
  */
+import type { PocketAccountList, PocketLinkedAccount } from '@common/pocket-accounts'
 import type { PocketClientProfileId } from '@common/pocket-client-profile'
 import type { PocketAuthState, PocketSmsResult, PocketUserInfo } from './pocket-auth-core'
 import {
   CHECKIN_URL,
   SMS_LOGIN_URL,
   SMS_SEND_URL,
+  SWITCH_LINKED_ACCOUNT_URL,
   TOKEN_CHECK_URL,
   USER_MONEY_URL,
 } from '@common/pocket-api-urls'
+import { toApiId } from '@common/pocket-ids'
 import { debug, log } from '../logger'
 import {
   credentials,
@@ -103,9 +106,13 @@ export async function sendSms(
 }
 
 /** 从登录响应/资料接口中提取展示用信息（字段名服务端不同接口不统一，逐个兜底） */
+function userRecord(content: Record<string, unknown> | undefined | null): Record<string, unknown> {
+  const record = content ?? {}
+  return (record.userInfo || record.user || record) as Record<string, unknown>
+}
+
 function pickUserInfo(content: Record<string, unknown> | undefined | null): PocketUserInfo {
-  const c = (content || {}) as Record<string, unknown>
-  const user = (c.userInfo || c.user || c) as Record<string, unknown>
+  const user = userRecord(content)
   return {
     nickname: String(user.nickname || user.nickName || user.userName || ''),
     avatar: String(user.avatar || user.userAvatar || ''),
@@ -201,6 +208,88 @@ export async function loginByToken(
   // token 登录的手机号由用户手填、无区号语义（该链路不校验手机号），按 86 存档只为展示不带前缀
   await saveAuth(mobile.trim(), trimmed, info, '86', profile)
   return getAuthState()
+}
+
+async function loadLinkedAccounts(token: string): Promise<PocketAccountList> {
+  const envelope = await postPocket<Record<string, unknown>>(TOKEN_CHECK_URL, { from: 'appstart' }, token)
+  if (envelope.status !== undefined && TOKEN_INVALID_STATUSES.has(envelope.status))
+    throwAuthExpired()
+  if (!envelope.success)
+    throw new Error(envelope.message || '无法读取口袋48账号列表')
+
+  const current = pickUserInfo(envelope.content)
+  const links = userRecord(envelope.content).bigSmallInfo as {
+    bigUserInfo?: Record<string, unknown>
+    smallUserInfo?: Record<string, unknown>[]
+  } | undefined
+  const accounts = new Map<string, PocketLinkedAccount>()
+  const primary = pickUserInfo(links?.bigUserInfo)
+  if (primary.userId)
+    accounts.set(primary.userId, { ...primary, isPrimary: true })
+  for (const entry of Array.isArray(links?.smallUserInfo) ? links.smallUserInfo : []) {
+    const account = pickUserInfo(entry)
+    if (account.userId && !accounts.has(account.userId))
+      accounts.set(account.userId, { ...account, isPrimary: false })
+  }
+  const activeUserId = current.userId || getAuthState().userId
+  if (activeUserId && !accounts.has(activeUserId))
+    accounts.set(activeUserId, { ...current, userId: activeUserId, isPrimary: !primary.userId })
+  return { activeUserId, accounts: [...accounts.values()] }
+}
+
+export function getLinkedAccounts(): Promise<PocketAccountList> {
+  const token = getToken()
+  if (!token)
+    throw new Error('未登录口袋48账号')
+  return loadLinkedAccounts(token)
+}
+
+let switchingAccount = false
+
+/** 只切换当前口袋账号已绑定的主号 / 小号；凭证始终留在主进程。 */
+export async function switchLinkedAccount(userId: string): Promise<PocketAuthState> {
+  if (switchingAccount)
+    throw new Error('正在切换账号')
+  const token = getToken()
+  const stored = credentials.getStored()
+  if (!token || !stored)
+    throw new Error('未登录口袋48账号')
+  switchingAccount = true
+  try {
+    const { activeUserId, accounts } = await loadLinkedAccounts(token)
+    const target = accounts.find(account => account.userId === userId)
+    if (!target)
+      throw new Error('该账号未绑定到当前口袋48账号')
+    if (target.userId === activeUserId)
+      return getAuthState()
+    if (getToken() !== token)
+      throw new Error('登录状态已变更，请重试')
+
+    const profile = currentClientProfile()
+    const envelope = await postPocket<Record<string, unknown>>(
+      SWITCH_LINKED_ACCOUNT_URL,
+      { toUserId: toApiId(target.userId), token },
+      token,
+      undefined,
+      profile,
+    )
+    if (!isEnvelopeOk(envelope))
+      throw new Error(envelope.message || '切换账号失败')
+    const info = pickUserInfo(envelope.content)
+    const nextToken = userRecord(envelope.content).token
+    if (typeof nextToken !== 'string' || !nextToken.trim() || info.userId !== target.userId)
+      throw new Error('口袋48返回的切换结果不完整，请重试')
+
+    await saveAuth(stored.mobile, nextToken, {
+      ...info,
+      nickname: info.nickname || target.nickname,
+      avatar: info.avatar || target.avatar,
+    }, normalizeArea(stored.area), profile, token)
+    return getAuthState()
+  }
+  finally {
+    switchingAccount = false
+  }
 }
 
 // ===== 登录有效性 =====
@@ -317,8 +406,7 @@ export async function verifyLogin(): Promise<PocketVerifyResult> {
   if (!envelope.success)
     return { ...empty, message: envelope.message || 'token 校验失败' }
   const info = pickUserInfo(envelope.content)
-  const c = (envelope.content || {}) as Record<string, unknown>
-  const user = (c.userInfo || c.user || c) as Record<string, unknown>
+  const user = userRecord(envelope.content)
   const social = pickSocialStats(user)
   const support = pickNonNegativeNumber(user, 'support')
   // 验证通过即用服务端最新资料回写本地（用户可能改过头像/昵称），token 不动

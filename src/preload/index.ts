@@ -1,6 +1,6 @@
 import type { AppConfig, ConfigKey, FloatTopmost } from '@common/app-config'
 import type { FeedbackInput } from '@common/feedback'
-import type { DanmakuBatch, FfmpegDownloadProgress, FloatPlayerKind, FloatPlayerPayload, IpcEventArgs, IpcEventChannel, IpcInvokeArgs, IpcInvokeChannel, IpcInvokeReturn, mainAPI, MemberDataContent, MemberFlagKind, MemberTeamPromotion, NetRequestOptions, PocketClientProfileId, PocketDanmakuBatch, PocketRoomBatch, PocketRoomReplyTarget, PocketUnreadBatch, RoomAlbumDownloadProgress, RoomAlbumDownloadSource, TaskSnapshot, UpdaterState } from './ipc-contract'
+import type { DanmakuBatch, FfmpegDownloadProgress, FloatPlayerKind, FloatPlayerPayload, IpcEventArgs, IpcEventChannel, IpcInvokeArgs, IpcInvokeChannel, IpcInvokeReturn, mainAPI, MemberDataContent, MemberFlagKind, MemberTeamPromotion, NetRequestOptions, PocketAuthState, PocketClientProfileId, PocketDanmakuBatch, PocketRoomBatch, PocketRoomReplyTarget, PocketUnreadBatch, RoomAlbumDownloadProgress, RoomAlbumDownloadSource, TaskSnapshot, UpdaterState } from './ipc-contract'
 import { contextBridge, ipcRenderer } from 'electron'
 
 /**
@@ -186,6 +186,8 @@ const api = {
   pocketLoginByToken: (token: string, mobile?: string, clientProfile?: PocketClientProfileId) =>
     invokeIpc('pocketLoginByToken', token, mobile, clientProfile),
   pocketGetAuthState: () => invokeIpc('pocketGetAuthState'),
+  pocketGetLinkedAccounts: () => invokeIpc('pocketGetLinkedAccounts'),
+  pocketSwitchLinkedAccount: (userId: string) => invokeIpc('pocketSwitchLinkedAccount', userId),
   pocketLogout: () => invokeIpc('pocketLogout'),
   pocketGetChatroomId: (liveId: string) => invokeIpc('pocketGetChatroomId', liveId),
   pocketGetLiveResult: (liveId: string) => invokeIpc('pocketGetLiveResult', liveId),
@@ -213,6 +215,8 @@ const api = {
   // pocketAuthExpired 由 IpcEventMap 派生：主进程清失效凭证时广播
   pocketAuthExpired: (callback: () => void) =>
     onIpc('pocketAuthExpired', callback),
+  pocketAuthChanged: (callback: (_state: PocketAuthState) => void) =>
+    onIpc('pocketAuthChanged', callback),
 
   // 房间消息发送（QChat 圈组长连接）：对端 main/pocket48/pocket-room-qchat.ts
   pocketRoomQChatEnter: (serverId: string, channelId: string) => invokeIpc('pocketRoomQChatEnter', serverId, channelId),

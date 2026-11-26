@@ -21,6 +21,12 @@ import * as pocketUnread from '../pocket48/pocket-unread'
 import { broadcastIpc } from './send'
 import { handleTraced } from './trace'
 
+function resetAccountConnections(): void {
+  resetPocketDanmakuSessions()
+  resetRoomQChatSessions()
+  pocketUnread.clearAccountUnread()
+}
+
 export function registerPocketIPC(): void {
   // token 失效清凭证时广播各窗口：渲染层 pocket-auth 镜像同步复位，
   // 免得房间页已报「登录过期」而设置页仍显示已登录（对端：stores/pocket-auth.ts）。
@@ -53,12 +59,19 @@ export function registerPocketIPC(): void {
     clientProfile?: PocketClientProfileId,
   ) => pocketAuth.loginByToken(token, mobile, clientProfile))
   handleTraced('pocketGetAuthState', () => pocketAuth.getAuthState())
+  handleTraced('pocketGetLinkedAccounts', () => pocketAuth.getLinkedAccounts())
+  handleTraced('pocketSwitchLinkedAccount', async (_event, userId) => {
+    const previous = pocketAuth.getAuthState()
+    const state = await pocketAuth.switchLinkedAccount(userId)
+    if (previous.userId !== state.userId || previous.savedAt !== state.savedAt) {
+      resetAccountConnections()
+      broadcastIpc('pocketAuthChanged', state)
+    }
+    return state
+  })
   handleTraced('pocketLogout', () => {
     // 凭证既然要删，按该凭证建立的聊天室长连接（含进房身份）也一并断掉
-    resetPocketDanmakuSessions()
-    resetRoomQChatSessions()
-    // 未读即刻清空广播，不等下一轮 60s 检测
-    pocketUnread.clearAccountUnread()
+    resetAccountConnections()
     return pocketAuth.logout()
   })
   // IM 凭据（accid + imToken）不设 IPC 通道：渲染层零调用方，token 不应出主进程

@@ -7,8 +7,9 @@
  */
 import type { App } from 'vue'
 
-import { ElButton, ElCarousel, ElCarouselItem, ElCascader, ElDatePicker, ElDialog, ElEmpty, ElIcon, ElImage, ElInput, ElOption, ElProgress, ElRadio, ElRadioButton, ElRadioGroup, ElScrollbar, ElSelect, ElTabPane, ElTabs, ElTag, ElText, ElTooltip } from 'element-plus'
+import { ElAvatar, ElButton, ElCarousel, ElCarouselItem, ElCascader, ElDatePicker, ElDialog, ElEmpty, ElIcon, ElImage, ElInput, ElOption, ElProgress, ElRadio, ElRadioButton, ElRadioGroup, ElScrollbar, ElSelect, ElTabPane, ElTabs, ElTag, ElText, ElTooltip } from 'element-plus'
 
+import 'element-plus/es/components/avatar/style/css'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/carousel/style/css'
 import 'element-plus/es/components/carousel-item/style/css'
@@ -43,6 +44,7 @@ import 'element-plus/es/components/message-box/style/css'
  * 用对象而非数组：测试靠 Object.keys 与模板里的 <el-x> 做双向差集，键名是唯一事实来源。
  */
 export const ELEMENT_COMPONENTS = {
+  ElAvatar,
   ElButton,
   ElCarousel,
   ElCarouselItem,
