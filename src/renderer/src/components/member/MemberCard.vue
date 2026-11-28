@@ -2,6 +2,7 @@
 import type { MemberDetail } from '@renderer/utils/member-merge'
 import { Hide, Star, StarFilled, User, View } from '@element-plus/icons-vue'
 import MediaIcon from '@renderer/components/ui/MediaIcon.vue'
+import { followStatus } from '@renderer/composables/use-pocket-follow'
 import { segments } from '@renderer/utils/text-highlight'
 import Tools from '@renderer/utils/tools'
 import { computed } from 'vue'
@@ -55,8 +56,11 @@ const topRank = computed(() => {
  * 但两个按钮一起点亮会让人以为「既关注又屏蔽」。屏蔽是更强的负面状态，让它盖过关注态，
  * 点击语义随之变成「解除屏蔽并关注」，与 toggleFollowMember 的接线一致。
  */
+const followState = computed(() => followStatus(props.member?.userId))
 const followOn = computed(() => !!props.followed && !props.blocked)
 const followTitle = computed(() => {
+  if (followState.value)
+    return followState.value
   if (props.blocked)
     return '已屏蔽，点击解除屏蔽并关注'
   return props.followed ? '取消关注' : '关注她'
@@ -111,6 +115,8 @@ const subSegments = computed(() => segments(sub.value, props.keyword || ''))
           <el-tooltip :content="followTitle" placement="top" :show-after="300">
             <button
               class="quick-btn quick-btn--follow"
+              :disabled="followState === '同步中'"
+              :aria-label="followTitle"
               :class="{ 'is-on': followOn }"
               type="button"
               @click.stop="emit('toggleFollow', member)"

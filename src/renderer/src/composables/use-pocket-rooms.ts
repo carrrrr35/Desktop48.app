@@ -38,6 +38,7 @@ import type { LiveListItem } from '@renderer/services/api-types'
 import type { PocketRoomMessageView } from '@renderer/utils/pocket-room-message'
 import type { RoomSnapshotRow } from '@renderer/utils/room-list-snapshot'
 import { mergeFollowedIds, OFFICIAL_POCKET_USER_ID } from '@common/pocket-rooms'
+import { usePocketFollowSync } from '@renderer/composables/use-pocket-follow'
 import EventBus from '@renderer/services/event-bus'
 import { resolveMemberRoomChannel } from '@renderer/services/room-channel'
 import useFloatPlayersStore from '@renderer/stores/float-players'
@@ -160,7 +161,7 @@ export function usePocketRooms() {
    * 本页最近一次拿到的口袋关注 ID（权威名单）。本地关注名单变化时用它区分
    * local / both / pocket，无需再打一次账号接口；load() 整体替换，账号关注操作增量维护。
    */
-  const pocketFollowIds = ref<Set<number>>(new Set())
+  const { ids: pocketFollowIds, sync: syncFollows, syncError: followSyncError } = usePocketFollowSync()
   /** 被过滤掉的房间数（无房间 / 已关闭）；左列给一行说明，避免「关注了却看不到」的困惑 */
   const hiddenRoomCount = ref(0)
   /** 是否已登录（登录态镜像；未登录时页面展示登录引导） */
@@ -361,6 +362,8 @@ export function usePocketRooms() {
   const channelCache = new Map<number, { serverId: string, channelId: string }>()
   /** 首灌请求序号：丢弃过期回包，避免快速刷新时数据错乱 */
   let loadRequestId = 0
+  /** 上次首灌时的账号 ID，换号时同步清掉账号相关的门禁与房间缓存 */
+  let lastAccountUserId = ''
   /**
    * 上次首灌成功时的成员集合签名（见 followSignature）与完成时刻。
    * 切回页面时若签名未变且仍在复用窗口内，直接沿用当前列表。
@@ -418,14 +421,10 @@ export function usePocketRooms() {
 
   /** 口袋关注 ID；失败返回空数组并由调用方降级（不抛错） */
   async function loadPocketFollowedIds(): Promise<number[]> {
-    try {
-      return await window.mainAPI.pocketGetFollowedIds()
-    }
-    catch (error) {
-      pocketFollowError.value = error instanceof Error ? error.message : String(error)
-      debugLog('pocket-rooms', '口袋关注拉取失败，降级为本地名单', error)
-      return []
-    }
+    if (await syncFollows())
+      return [...pocketFollowIds.value]
+    pocketFollowError.value = followSyncError.value
+    return []
   }
 
   /**
@@ -434,7 +433,7 @@ export function usePocketRooms() {
    * 减去屏蔽名单是「屏蔽优先」在房间页的落点：关注与屏蔽正交（见 composables/use-member-actions），
    * 账号关注照旧存在，但被屏蔽的成员不进左列——也就不必为它解析房间频道。
    */
-  async function loadFollowedIds(): Promise<{ ids: number[], pocketIds: number[], followSourceOf: Map<number, PocketRoomFollowSource> }> {
+  async function loadFollowedIds(): Promise<{ ids: number[], followSourceOf: Map<number, PocketRoomFollowSource> }> {
     // 屏蔽名单必须先就位：isBlocked 在未加载的空名单上恒为 false，漏加载等于放行被屏蔽成员
     await ensureBlockedLoaded()
     // 首灌走 refresh 而非 ensureLoaded：store 是模块级单例，ensureLoaded 命中后
@@ -443,10 +442,7 @@ export function usePocketRooms() {
       loadPocketFollowedIds(),
       refreshFollowedMembers().then(() => followedMembers.value),
     ])
-    return {
-      ...mergeFollowedIds(pocketIds, localEntries.map(entry => entry.userId), isBlocked),
-      pocketIds,
-    }
+    return mergeFollowedIds(pocketIds, localEntries.map(entry => entry.userId), isBlocked)
   }
 
   /** 共享 store 的全站直播索引；force=true 用于手动刷新并绕过 120s 新鲜缓存。 */
@@ -585,8 +581,8 @@ export function usePocketRooms() {
    * 新关注的成员若还没有房间条目，不在这里解析频道——那是 load() 的职责，页面重新
    * 激活时会补上。首灌期间跳过：load 已用最新名单重建列表，watch 拿旧列表重算反而会打架。
    */
-  watch(followedMembers, () => {
-    if (loading.value || !rooms.value.length)
+  watch([followedMembers, () => [...pocketFollowIds.value]], () => {
+    if (loading.value || !rooms.value.length || lastAccountUserId !== pocketAuthState.value.userId)
       return
     const localIds = new Set(followedMembers.value.map(entry => Number(entry.userId)))
     let changed = false
@@ -771,8 +767,6 @@ export function usePocketRooms() {
 
   /** 同房重选上次强制校正的时刻（按成员）：用于 SAME_ROOM_RECHECK_MS 时间门槛 */
   const sameRoomRecheckAt = new Map<number, number>()
-  /** 上次首灌时的账号 ID，换号时同步清掉账号相关的门禁与房间缓存 */
-  let lastAccountUserId = ''
 
   /** 清理与当前登录账号强绑定的缓存（登出 / 换号共用，避免门禁判定串号） */
   function clearAccountCaches(): void {
@@ -828,10 +822,9 @@ export function usePocketRooms() {
         debugLog('pocket-rooms', '直播状态拉取失败（无开播标记降级）', error)
         return liveByUserId.value
       })
-      const { ids, pocketIds, followSourceOf } = await loadFollowedIds()
+      const { ids, followSourceOf } = await loadFollowedIds()
       if (requestId !== loadRequestId)
         return
-      pocketFollowIds.value = new Set(pocketIds)
       // 签名按列表实际用到的输入截取：拉取期间再变，下次切回会因不符而重拉
       const usedSignature = followSignature()
       const liveMap = await livePromise
@@ -1844,19 +1837,6 @@ export function usePocketRooms() {
   }
 
   /**
-   * 账号关注操作成功后增量维护口袋侧镜像，供上面的本地名单 watch 重算来源。
-   * 必须在账号请求成功之后调用：失败时保持旧态，下一轮 load() 会重新拉取权威名单。
-   */
-  function notePocketFollow(userId: number, followed: boolean): void {
-    const next = new Set(pocketFollowIds.value)
-    if (followed)
-      next.add(userId)
-    else
-      next.delete(userId)
-    pocketFollowIds.value = next
-  }
-
-  /**
    * 临时打开某成员的大房间（成员详情卡入口 → 路由 query 的唯一入口）。
    *
    * 与关注房间的区别只在「条目从哪来」：不改关注名单、不落盘。频道经
@@ -2082,7 +2062,6 @@ export function usePocketRooms() {
   watch([loggedIn, () => pocketAuthState.value.userId, () => pocketAuthState.value.savedAt], ([value], [wasLoggedIn]) => {
     if (wasLoggedIn) {
       rooms.value = []
-      pocketFollowIds.value = new Set()
       selectedUserId.value = null
       temporaryRoom.value = null
       clearChat()
@@ -2171,8 +2150,6 @@ export function usePocketRooms() {
     closeTemporaryRoom,
     /** 关注开关改完来源后统一落库（见 applyRoomFollowSource） */
     applyRoomFollowSource,
-    /** 口袋账号关注成功后维护镜像（见 notePocketFollow） */
-    notePocketFollow,
 
     /** 切回页面时列表是否需要整表重拉（脏标记 / 复用窗口），见 onActivated */
     listNeedsReload,

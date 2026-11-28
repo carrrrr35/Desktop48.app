@@ -1,7 +1,8 @@
 import type { LiveListItem, LiveListItemView, OpenLive } from '@renderer/services/api-types'
+import { useActiveFollows } from '@renderer/composables/use-pocket-follow'
 import Apis from '@renderer/services/apis'
 import { LIVE_STATUS_POLL_MS, useLiveStatusStore } from '@renderer/stores/live-status'
-import { useBlockedMembersStore, useFollowedMembersStore } from '@renderer/stores/member-flags'
+import { useBlockedMembersStore } from '@renderer/stores/member-flags'
 import { debugLog } from '@renderer/utils/debug'
 import Tools from '@renderer/utils/tools'
 import { useIntervalFn } from '@vueuse/core'
@@ -31,7 +32,7 @@ export interface UseLiveIdleOptions {
  * 仅页面可见且空态时运行；由 keep-alive 生命周期驱动启停。
  */
 export function useLiveIdle({ isEmpty, onLiveFound }: UseLiveIdleOptions) {
-  const { followedMembers, ensureFollowedLoaded, isFollowed } = useFollowedMembersStore()
+  const { followedMembers, ensureFollowedLoaded, isFollowed } = useActiveFollows()
   const { ensureBlockedLoaded, isBlocked } = useBlockedMembersStore()
   const { liveItems, lastFetchedAt, refreshLiveStatus, acquireLiveStatusPolling } = useLiveStatusStore()
 

@@ -186,19 +186,5 @@ export function useFollowedMembersStore() {
     followMember: followed.add,
     /** 显式移除（不弹提示）：返回是否落库成功，调用方据此决定是否收起房间 */
     unfollowMember: followed.remove,
-    /**
-     * 口袋关注合并入本地名单（只增不删，策略 A）。
-     *
-     * 走批量 addMemberFlags 整批一次读改写——逐个 addMemberFlag 会每 id 写一次盘。
-     * 本地成员树里查不到的用户（非成员账号）id 仍会落库，但读取时不解析可见性，
-     * 对「关注成员直播优先展示」无影响；成员库同步到该用户后自然可见。
-     */
-    mergeFromPocket: async (ids: number[]): Promise<number> => {
-      const valid = ids.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0)
-      if (valid.length)
-        await window.mainAPI.addMemberFlags('followed', valid)
-      await followed.refresh()
-      return followed.members.value.length
-    },
   }
 }

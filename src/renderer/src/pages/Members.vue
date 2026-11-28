@@ -16,7 +16,8 @@ import CardSkeletonGrid from '@renderer/components/ui/skeleton/CardSkeletonGrid.
 import { useMemberActions } from '@renderer/composables/use-member-actions'
 import { useMemberSections } from '@renderer/composables/use-member-sections'
 import { useMemberSync } from '@renderer/composables/use-member-sync'
-import { useBlockedMembersStore, useFollowedMembersStore } from '@renderer/stores/member-flags'
+import { useActiveFollows } from '@renderer/composables/use-pocket-follow'
+import { useBlockedMembersStore } from '@renderer/stores/member-flags'
 import { useMemberTreeStore } from '@renderer/stores/member-tree'
 import Constants from '@renderer/utils/constants'
 import { monthBirthdays, todayBirthdays } from '@renderer/utils/member-birthday'
@@ -82,7 +83,7 @@ function openMemberDetail(member: MemberDetail | null) {
 const { refreshBlockedMembers } = useBlockedMembersStore()
 
 /** 关注名单：模块级共享状态，机制见 stores/member-flags.ts（直播列表页共用同一份） */
-const { refreshFollowedMembers } = useFollowedMembersStore()
+const { refreshFollowedMembers } = useActiveFollows()
 
 /** 关注 / 屏蔽的互斥规则集中在 use-member-actions.ts（本页卡片与三处详情抽屉共用同一份） */
 const { isBlocked, isFollowed, toggleBlockMember, toggleFollowMember } = useMemberActions()

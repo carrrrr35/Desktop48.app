@@ -6,9 +6,12 @@ import type { PocketAuthState, PocketCheckInResult, PocketVerifyResult } from '@
  * 不持有凭证本体——token 只留在主进程，渲染层拿到的永远是脱敏登录态。
  * 登录态一律经 applyAuthState 写入，账号身份变化时顺带作废小房间暗号的解锁态。
  */
+import { pocketAccountKey } from '@common/pocket-accounts'
 import { clearSmallRoomUnlocks } from '@renderer/utils/small-room-unlock'
 import { ElMessage } from 'element-plus'
 import { ref } from 'vue'
+
+export { pocketAccountKey }
 
 const LOGGED_OUT: PocketAuthState = {
   loggedIn: false,
@@ -31,12 +34,6 @@ let authRevision = 0
 if (typeof window !== 'undefined') {
   window.mainAPI.pocketAuthExpired?.(() => applyAuthState({ ...LOGGED_OUT }))
   window.mainAPI.pocketAuthChanged?.(applyAuthState)
-}
-
-/** 旧凭证可能没有 userId，保留脱敏资料作为兜底。 */
-export function pocketAccountKey(state: PocketAuthState): string {
-  const identity = state.userId || `${state.mobileMasked}|${state.nickname}`
-  return `${state.loggedIn}|${identity}|${state.savedAt}`
 }
 
 /**

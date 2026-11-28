@@ -8,8 +8,8 @@
  * 反查失败时按名单里的 realName 兜底：宁可少一张头像，也不要整条消失。
  */
 import type { MemberFlag } from '@common/member-flags'
+import { useActiveFollows } from '@renderer/composables/use-pocket-follow'
 import { useMemberDirectoryStore } from '@renderer/stores/member-directory'
-import { useFollowedMembersStore } from '@renderer/stores/member-flags'
 import Constants from '@renderer/utils/constants'
 import { isHonoraryMember } from '@renderer/utils/member-stats'
 import Tools from '@renderer/utils/tools'
@@ -38,7 +38,7 @@ export interface FollowedMemberEntry {
  * 这里只跟随名单变化重算，关注 / 取关后头像条自动增删。
  */
 export function useFollowedMemberEntries() {
-  const { followedMembers } = useFollowedMembersStore()
+  const { followedMembers } = useActiveFollows()
   const { findMemberByUserId, findOfficialAccount } = useMemberDirectoryStore()
 
   const entries = ref<FollowedMemberEntry[]>([])

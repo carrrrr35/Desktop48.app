@@ -53,12 +53,15 @@ vi.mock('@renderer/stores/live-status', () => ({
   }),
 }))
 
-vi.mock('@renderer/stores/member-flags', () => ({
-  useFollowedMembersStore: () => ({
+vi.mock('@renderer/composables/use-pocket-follow', () => ({
+  useActiveFollows: () => ({
     followedMembers: ref([]),
     ensureFollowedLoaded: async () => {},
     isFollowed: () => false,
   }),
+}))
+
+vi.mock('@renderer/stores/member-flags', () => ({
   useBlockedMembersStore: () => ({
     ensureBlockedLoaded: async () => {},
     isBlocked: (userId?: string | number) => blockedIds.has(String(userId ?? '')),

@@ -711,13 +711,13 @@ interface StaticIpcInvokeMap {
   /** 每日签到；重复签到 / 网络异常等失败以 reject 报错 */
   pocketCheckIn: InvokeSpec<[], PocketCheckInResult>
   /** 拉取账号关注成员 ID 列表（只给 ID，详情由本地成员树解析）；未登录空数组，过期 reject */
-  pocketGetFollowedIds: InvokeSpec<[], number[]>
+  pocketGetFollowedIds: InvokeSpec<[account: string], number[]>
   pocketGetConversations: InvokeSpec<[lastTime?: number], PocketMessagePage<PocketConversation>>
   pocketGetConversationMessages: InvokeSpec<[targetUserId: string, lastTime?: number], PocketMessagePage<PocketDirectMessage>>
   /** 关注成员（桌面端 toggle 双写）；失败 reject，调用方静默降级 */
-  pocketFollowMember: InvokeSpec<[userId: number], void>
+  pocketFollowMember: InvokeSpec<[userId: number, account: string], void>
   /** 取消关注成员（桌面端 toggle 双写）；失败 reject，调用方静默降级 */
-  pocketUnfollowMember: InvokeSpec<[userId: number], void>
+  pocketUnfollowMember: InvokeSpec<[userId: number, account: string], void>
   /** 解析成员的房间频道（口袋 App「房间」留言流用，非直播间弹幕）；未登录返回空频道，过期 reject */
   pocketGetRoomChannel: InvokeSpec<[userId: number], PocketRoomChannel>
   /**

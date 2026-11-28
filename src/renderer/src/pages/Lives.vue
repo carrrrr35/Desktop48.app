@@ -9,6 +9,7 @@ import CardSkeletonGrid from '@renderer/components/ui/skeleton/CardSkeletonGrid.
 import { useLiveIdle } from '@renderer/composables/use-live-idle'
 import { useMemberDetail } from '@renderer/composables/use-member-detail'
 import { enrichLiveItem, usePagedLiveList } from '@renderer/composables/use-paged-live-list'
+import { useActiveFollows } from '@renderer/composables/use-pocket-follow'
 import {
   isShowLive,
   MAX_ONGOING_SHOWS,
@@ -19,7 +20,7 @@ import {
 import EventBus from '@renderer/services/event-bus'
 import useFloatPlayersStore from '@renderer/stores/float-players'
 import { LIVE_STATUS_POLL_MS, useLiveStatusStore } from '@renderer/stores/live-status'
-import { useBlockedMembersStore, useFollowedMembersStore } from '@renderer/stores/member-flags'
+import { useBlockedMembersStore } from '@renderer/stores/member-flags'
 import { debugLog } from '@renderer/utils/debug'
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -35,7 +36,7 @@ const { onShowClick } = useShowActions()
 
 // 关注与屏蔽名单：模块级共享状态（与成员页共用同一份），页面被 keep-alive 缓存，
 // 屏蔽与关注变更均直接驱动当前列表就地响应，无需等下次翻页或手动刷新
-const { followedMembers, refreshFollowedMembers, isFollowed } = useFollowedMembersStore()
+const { followedMembers, refreshFollowedMembers, isFollowed } = useActiveFollows()
 const { isBlocked } = useBlockedMembersStore()
 const { lastFetchedAt, refreshLiveStatus, removeLive } = useLiveStatusStore()
 

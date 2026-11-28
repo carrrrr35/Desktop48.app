@@ -4,6 +4,7 @@
  */
 import type { PocketRoomReplyTarget } from '@preload/ipc-contract'
 import type { IpcMainInvokeEvent } from 'electron'
+import { pocketAccountKey } from '../../common/pocket-accounts'
 import * as pocketAuth from '../pocket48/pocket-auth'
 import {
   handlePocketDanmakuSend,
@@ -20,6 +21,11 @@ import {
 import * as pocketUnread from '../pocket48/pocket-unread'
 import { broadcastIpc } from './send'
 import { handleTraced } from './trace'
+
+function checkFollowAccount(account: string): void {
+  if (account !== pocketAccountKey(pocketAuth.getAuthState()))
+    throw new Error('口袋账号已切换，请重试')
+}
 
 function resetAccountConnections(): void {
   resetPocketDanmakuSessions()
@@ -80,14 +86,21 @@ export function registerPocketIPC(): void {
     pocketAuth.getLiveResult(liveId))
   handleTraced('pocketVerifyLogin', () => pocketAuth.verifyLogin())
   handleTraced('pocketCheckIn', () => pocketAuth.checkIn())
-  // 关注列表（账号维度）：拉取 + 桌面端 toggle 双写；失败以 reject 报错，调用方静默降级
-  handleTraced('pocketGetFollowedIds', () => pocketAuth.getFollowedIds())
+  // 账号身份在读取凭证前校验，避免排队的旧 IPC 请求作用到新账号。
+  handleTraced('pocketGetFollowedIds', (_event, account) => {
+    checkFollowAccount(account)
+    return pocketAuth.getFollowedIds()
+  })
   handleTraced('pocketGetConversations', (_event, lastTime) => pocketAuth.getConversations(lastTime))
   handleTraced('pocketGetConversationMessages', (_event, targetUserId, lastTime) => pocketAuth.getConversationMessages(targetUserId, lastTime))
-  handleTraced('pocketFollowMember', (_event: IpcMainInvokeEvent, userId: number) =>
-    pocketAuth.followMember(userId))
-  handleTraced('pocketUnfollowMember', (_event: IpcMainInvokeEvent, userId: number) =>
-    pocketAuth.unfollowMember(userId))
+  handleTraced('pocketFollowMember', (_event, userId, account) => {
+    checkFollowAccount(account)
+    return pocketAuth.followMember(userId)
+  })
+  handleTraced('pocketUnfollowMember', (_event, userId, account) => {
+    checkFollowAccount(account)
+    return pocketAuth.unfollowMember(userId)
+  })
   // 成员房间（口袋 App「房间」频道留言流，非直播间弹幕）：频道解析 + 历史消息拉取
   // 渲染层进房必走这里，顺手用实时解析结果校正未读缓存：成员换房后旧频道的未读不会一直挂着
   handleTraced('pocketGetRoomChannel', async (_event: IpcMainInvokeEvent, userId: number) => {

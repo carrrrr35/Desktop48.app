@@ -70,6 +70,7 @@ vi.mock('@renderer/stores/pocket-auth', async () => {
   authMock.state = state
   return {
     pocketAuthState: state,
+    pocketAuthErrorMessage: (error: Error) => error.message,
     refreshPocketAuthState: async () => state.value,
   }
 })
@@ -503,10 +504,11 @@ afterEach(async () => {
   activeScope = null
   for (const extra of extraScopes.splice(0))
     extra.stop()
+  // 登录态是模块级单例：收尾必须在实例全部 stop 之后，翻转才不会唤醒 watch(loggedIn)
+  authMock.state.value = { ...authMock.state.value, userId: '999', loggedIn: true }
+  await Promise.resolve()
   vi.unstubAllGlobals()
   vi.clearAllMocks()
-  // 登录态是模块级单例：收尾必须在实例全部 stop 之后，翻转才不会唤醒 watch(loggedIn)
-  authMock.setLoggedIn(true)
   // 置顶名单同为模块级单例（node 环境没有 localStorage，内存态仍要复位）
   const { pinnedIds, toggleRoomPin } = (await import('@renderer/stores/room-pins')).useRoomPinsStore()
   for (const userId of [...pinnedIds.value])
@@ -514,6 +516,31 @@ afterEach(async () => {
 })
 
 describe('use-pocket-rooms / 房间列表构建', () => {
+  it.each([false, true])('小号关注小王后切回大号，本机收藏=%s', async (saved) => {
+    const id = 10001
+    const { api } = await setup({
+      localFlags: saved ? [{ userId: id, realName: '小王', teamColor: '' }] : [],
+    })
+    const { pocketAccountKey } = await import('../src/common/pocket-accounts')
+    const { setPocketFollow } = await import('@renderer/composables/use-pocket-follow')
+    const follows = new Map<string, number[]>()
+    window.mainAPI.pocketFollowMember = vi.fn(async (memberId) => {
+      follows.set(authMock.state.value.userId, [memberId])
+    })
+    vi.mocked(window.mainAPI.pocketGetFollowedIds).mockImplementation(async () => follows.get(authMock.state.value.userId) ?? [])
+    authMock.state.value = { ...authMock.state.value, userId: 'small' }
+    await nextTick()
+    await api.load()
+    expect(await setPocketFollow(id, true, pocketAccountKey(authMock.state.value))).toBe(true)
+    await api.load()
+    expect(api.rooms.value.map(room => room.followSource)).toEqual([saved ? 'both' : 'pocket'])
+
+    authMock.state.value = { ...authMock.state.value, userId: 'main' }
+    await nextTick()
+    await vi.waitFor(() => expect(api.loading.value).toBe(false))
+    expect(api.rooms.value.map(room => [room.userId, room.followSource])).toEqual(saved ? [[id, 'local']] : [])
+  })
+
   it('口袋关注 ∪ 本地关注，在直播的排前面，其余按昵称排序', async () => {
     const { api } = await setup({
       pocketIds: [10002, 10001],
@@ -716,7 +743,8 @@ describe('use-pocket-rooms / 关注来源就地重算', () => {
 
     const { useFollowedMembersStore } = await import('@renderer/stores/member-flags')
     const store = useFollowedMembersStore()
-    api.notePocketFollow(10002, false)
+    const { usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+    usePocketFollowSync().ids.value.delete(10002)
     store.followedMembers.value = store.followedMembers.value.filter(member => Number(member.userId) !== 10002)
     await nextTick()
 
@@ -3292,7 +3320,8 @@ describe('use-pocket-rooms / 切回页面的列表复用', () => {
   it('账号关注镜像变化（notePocketFollow）：标脏，切回时重拉', async () => {
     const { api } = await setup({ pocketIds: [10001] })
     await api.load()
-    api.notePocketFollow(10003, true)
+    const { usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+    usePocketFollowSync().ids.value.add(10003)
     expect(api.listNeedsReload()).toBe(true)
   })
 
@@ -3331,7 +3360,8 @@ describe('use-pocket-rooms / 切回页面的列表复用', () => {
     const pending = api.load()
     await vi.advanceTimersByTimeAsync(0)
     // 此刻在成员页关注了另一个成员：当前输入已变，但列表不含它
-    api.notePocketFollow(10003, true)
+    const { usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+    usePocketFollowSync().ids.value.add(10003)
     expect(gate.release).toBeTypeOf('function')
     gate.release!()
     await pending

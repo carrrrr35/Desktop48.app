@@ -2,6 +2,7 @@
 import type { MemberDetail } from '@renderer/utils/member-merge'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChatDotRound, Close, Film, Hide, Link, Star, StarFilled, View } from '@element-plus/icons-vue'
 import MediaIcon from '@renderer/components/ui/MediaIcon.vue'
+import { followStatus } from '@renderer/composables/use-pocket-follow'
 import { resolveMemberRoomChannel } from '@renderer/services/room-channel'
 import Constants from '@renderer/utils/constants'
 import { formatBirthdayCountdown, memberDaysUntilBirthday } from '@renderer/utils/member-birthday'
@@ -131,6 +132,7 @@ const actionable = computed(() => typeof props.member?.userId === 'number')
  * 关注与屏蔽正交、数据上可同时成立，但两个按钮一起点亮会误导；点击语义随之
  * 变成「解除屏蔽并关注」，见 composables/use-member-actions 的 toggleFollowMember。
  */
+const followState = computed(() => followStatus(props.member?.userId))
 const followOn = computed(() => !!props.followed && !props.blocked)
 
 /**
@@ -184,7 +186,7 @@ const followPulse = ref(0)
 const blockPulse = ref(0)
 
 function onFollow() {
-  if (!props.member)
+  if (!props.member || followState.value === '同步中')
     return
   followPulse.value += 1
   emit('toggleFollow', props.member)
@@ -456,14 +458,14 @@ function openRoom() {
           </el-icon>
           <span>看 TA 的房间</span>
         </button>
-        <button class="act act--follow" :class="{ 'is-on': followOn }" @click="onFollow">
+        <button class="act act--follow" :disabled="followState === '同步中'" :class="{ 'is-on': followOn }" @click="onFollow">
           <span :key="followPulse" class="act-icon" :class="{ 'is-pulse': followPulse > 0 }">
             <el-icon :size="15">
               <StarFilled v-if="followOn" />
               <Star v-else />
             </el-icon>
           </span>
-          <span>{{ followOn ? '取消关注' : '关注' }}</span>
+          <span>{{ followState || (followOn ? '取消关注' : '关注') }}</span>
         </button>
         <button class="act act--block" :class="{ 'is-on': blocked }" @click="onBlock">
           <span :key="blockPulse" class="act-icon" :class="{ 'is-pulse': blockPulse > 0 }">

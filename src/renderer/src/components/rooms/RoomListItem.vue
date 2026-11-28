@@ -83,12 +83,10 @@ const emit = defineEmits<{
           >
             <MediaIcon class="room-pin-ico" name="pushpinFilled" :size="13" />
           </el-tooltip>
-          <!-- 只在本地名单里（账号未关注 / 已取关）：账号关注会被同步并进本地名单，
-             所以这个标记只在「本地独自撑着一个房间」时出现，不会几乎每行都挂 -->
           <span
             v-if="room.followSource === 'local'"
             class="room-local-tag"
-            title="本地关注（仅本机，直播 / 回放优先展示）"
+            title="本机收藏 · 大小号共用"
           >本地</span>
           <!-- 临时房间：本次会话临时打开的，不属于关注房间 -->
           <span v-if="room.temporary" class="room-temp-tag">临时</span>
@@ -481,8 +479,7 @@ const emit = defineEmits<{
   box-shadow: none;
 }
 
-/* 「本地」关注标记：只在仅本地关注的房间出现——账号关注会被同步并进本地名单（both），
- * 用中性色与「临时 / 已关闭」同规格，表达「这个房间只靠本机记录留着」 */
+/* 本机收藏标记与其他房间状态标签保持同一尺寸。 */
 .room-local-tag {
   @extend %soft-tag;
 

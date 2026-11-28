@@ -1,14 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeMember } from './fixtures/member'
 
-/**
- * stores/member-flags 的口袋关注合并（mergeFromPocket）与
- * use-member-actions 的双写编排（策略 A 的渲染侧两半），
- * 以及关注 / 屏蔽的正交关系（屏蔽不连带取关，见 use-member-actions 的文件头）。
- *
- * store 是模块级单例：每个用例都 resetModules 后重新 import，拿到干净状态。
- */
-
 const { ElMessageMock } = vi.hoisted(() => {
   // ElMessage 既可调用、又挂着 error/success/warning 静态方法：Object.assign 一次给全，
   // 逐个赋值不成立（vi.fn() 的函数类型上写这些属性属于新增属性）
@@ -31,10 +23,11 @@ interface SetupOptions {
   /** 初始屏蔽名单（kind='blocked'）：验证屏蔽优先与「屏遮不改关注」的起点 */
   blockedFlags?: FlagEntry[]
   /** true = 服务端关注写入抛错（双写失败降级场景） */
+  pocketIds?: number[]
   followWriteFails?: boolean
 }
 
-async function setup({ loggedIn, flags: initialFlags = [], blockedFlags: initialBlocked = [], followWriteFails = false }: SetupOptions) {
+async function setup({ loggedIn, flags: initialFlags = [], blockedFlags: initialBlocked = [], pocketIds = [], followWriteFails = false }: SetupOptions) {
   vi.resetModules()
   const calls = {
     addMemberFlag: [] as Array<[string, number]>,
@@ -70,8 +63,10 @@ async function setup({ loggedIn, flags: initialFlags = [], blockedFlags: initial
         if (kind === 'followed')
           flags = [...flags, ...userIds.map(entryOf)]
       }),
+      pocketGetFollowedIds: vi.fn(async () => pocketIds),
       pocketGetAuthState: vi.fn(async () => ({
         loggedIn,
+        userId: 'main',
         nickname: '',
         avatar: '',
         mobileMasked: '',
@@ -94,6 +89,11 @@ async function setup({ loggedIn, flags: initialFlags = [], blockedFlags: initial
     import('@renderer/stores/member-flags'),
     import('@renderer/composables/use-member-actions'),
   ])
+  const { refreshPocketAuthState } = await import('@renderer/stores/pocket-auth')
+  await refreshPocketAuthState()
+  const { usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+  if (loggedIn)
+    await usePocketFollowSync().sync()
   return {
     store: useFollowedMembersStore(),
     blockedStore: useBlockedMembersStore(),
@@ -108,34 +108,48 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('mergeFromPocket（口袋关注合并，只增不删）', () => {
-  it('批量落库后重拉，返回合并后总数', async () => {
-    const { store, calls } = await setup({ loggedIn: true })
-    const total = await store.mergeFromPocket([10001, 10002])
-    expect(calls.addMemberFlags).toEqual([['followed', [10001, 10002]]])
-    expect(total).toBe(2)
-    expect(store.followedMembers.value.map(member => member.userId)).toEqual([10001, 10002])
+describe('账号关注同步', () => {
+  it('关注写入期间切号，旧请求的结果留在原账号', async () => {
+    const { actions } = await setup({ loggedIn: true })
+    const { pocketAuthState } = await import('@renderer/stores/pocket-auth')
+    const { pocketAccountKey } = await import('@common/pocket-accounts')
+    const { setPocketFollow, usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+    const owner = pocketAccountKey(pocketAuthState.value)
+    let finish!: () => void
+    vi.mocked(window.mainAPI.pocketFollowMember).mockImplementationOnce(() => new Promise((resolve) => {
+      finish = resolve
+    }))
+    const saving = setPocketFollow(7, true, owner)
+    expect(window.mainAPI.pocketFollowMember).toHaveBeenCalledWith(7, owner)
+    pocketAuthState.value = { ...pocketAuthState.value, userId: 'small' }
+    await usePocketFollowSync().sync()
+    finish()
+    expect(await saving).toBe(false)
+    expect(actions.isFollowed(7)).toBe(false)
+    expect(await setPocketFollow(8, true, owner)).toBe(false)
+    expect(window.mainAPI.pocketFollowMember).toHaveBeenCalledTimes(1)
   })
 
-  it('脏 id 被过滤，合法 id 原样合并', async () => {
-    const { store, calls } = await setup({ loggedIn: true })
-    await store.mergeFromPocket([1, 0, -5, Number.NaN, '3' as unknown as number])
-    expect(calls.addMemberFlags).toEqual([['followed', [1, 3]]])
-  })
-
-  it('空列表不写库但仍重拉（合并结果以主进程解析为准）', async () => {
-    const { store, calls } = await setup({ loggedIn: true, flags: [{ userId: 7, realName: '甲', teamColor: '' }] })
-    const total = await store.mergeFromPocket([])
+  it('新账号空名单取代旧名单，保留共享本机收藏并丢弃前一个账号的迟到结果', async () => {
+    const { store, actions, calls } = await setup({ loggedIn: true, flags: [{ userId: 7, realName: '小王', teamColor: '' }], pocketIds: [1] })
+    await store.refreshFollowedMembers()
+    const { pocketAuthState } = await import('@renderer/stores/pocket-auth')
+    const { usePocketFollowSync } = await import('@renderer/composables/use-pocket-follow')
+    const { sync } = usePocketFollowSync()
+    expect(actions.isFollowed(1)).toBe(true)
+    let finish!: (ids: number[]) => void
+    vi.mocked(window.mainAPI.pocketGetFollowedIds).mockImplementationOnce(() => new Promise((resolve) => {
+      finish = resolve
+    })).mockResolvedValue([])
+    const old = sync()
+    pocketAuthState.value = { ...pocketAuthState.value, userId: 'small' }
+    await sync()
+    finish([1, 7])
+    expect(await old).toBe(false)
+    expect(actions.isFollowed(1)).toBe(false)
+    expect(actions.isFollowed(7)).toBe(false)
+    expect(store.isFollowed(7)).toBe(true)
     expect(calls.addMemberFlags).toEqual([])
-    expect(total).toBe(1)
-  })
-
-  it('isFollowed 覆盖合并进来的 id（数字/字符串归一化）', async () => {
-    const { store } = await setup({ loggedIn: true })
-    await store.mergeFromPocket([10001])
-    expect(store.isFollowed(10001)).toBe(true)
-    expect(store.isFollowed('10001')).toBe(true)
-    expect(store.isFollowed(999)).toBe(false)
   })
 })
 
@@ -176,23 +190,27 @@ describe('显式关注 / 取关（房间页本地关注开关用）', () => {
   })
 })
 
-describe('toggleFollowMember 双写口袋关注', () => {
-  it('新关注：本地落库 + pocketFollowMember', async () => {
+describe('toggleFollowMember 按当前账号操作', () => {
+  it('账号关注成功后仅更新账号名单', async () => {
     const { actions, calls } = await setup({ loggedIn: true })
     await actions.toggleFollowMember(makeMember({ userId: 10001, realName: '甲' }))
-    expect(calls.addMemberFlag).toEqual([['followed', 10001]])
+    expect(calls.addMemberFlag).toEqual([])
+    expect(actions.isFollowed(10001)).toBe(true)
     expect(calls.pocketFollow).toEqual([10001])
     expect(calls.pocketUnfollow).toEqual([])
   })
 
-  it('取消关注：本地移除 + pocketUnfollowMember', async () => {
+  it('账号取关保留独立的本机收藏', async () => {
     const { store, actions, calls } = await setup({
+      pocketIds: [10001],
       loggedIn: true,
       flags: [{ userId: 10001, realName: '甲', teamColor: '' }],
     })
     await store.refreshFollowedMembers()
     await actions.toggleFollowMember(makeMember({ userId: 10001, realName: '甲' }))
-    expect(calls.removeMemberFlag).toEqual([['followed', 10001]])
+    expect(calls.removeMemberFlag).toEqual([])
+    expect(store.isFollowed(10001)).toBe(true)
+    expect(actions.isFollowed(10001)).toBe(false)
     expect(calls.pocketUnfollow).toEqual([10001])
     expect(calls.pocketFollow).toEqual([])
   })
@@ -204,11 +222,12 @@ describe('toggleFollowMember 双写口袋关注', () => {
     expect(calls.pocketFollow).toEqual([])
   })
 
-  it('双写失败静默降级：本地状态已生效，不向调用方抛错', async () => {
+  it('账号写入失败，保留原状态并提示重试', async () => {
     const { actions, calls } = await setup({ loggedIn: true, followWriteFails: true })
     await expect(actions.toggleFollowMember(makeMember({ userId: 10001, realName: '甲' }))).resolves.toBeUndefined()
-    expect(calls.addMemberFlag).toEqual([['followed', 10001]])
-    expect(ElMessageMock).toHaveBeenCalled()
+    expect(calls.addMemberFlag).toEqual([])
+    expect(actions.isFollowed(10001)).toBe(false)
+    expect(ElMessageMock.error).toHaveBeenCalled()
   })
 
   it('点关注顺带解除屏蔽（唯一保留的互斥方向：用户在表达「我要看 TA」）', async () => {
@@ -222,7 +241,8 @@ describe('toggleFollowMember 双写口袋关注', () => {
     await actions.toggleFollowMember(makeMember({ userId: 10001, realName: '甲' }))
     expect(calls.removeMemberFlag).toContainEqual(['blocked', 10001])
     expect(calls.pocketFollow).toEqual([10001])
-    expect(store.isFollowed(10001)).toBe(true)
+    expect(actions.isFollowed(10001)).toBe(true)
+    expect(store.isFollowed(10001)).toBe(false)
   })
 })
 
@@ -238,8 +258,6 @@ describe('屏蔽与关注正交（屏蔽不再连带取关）', () => {
     await actions.toggleBlockMember(makeMember({ userId: 10001, realName: '甲' }))
 
     expect(calls.addMemberFlag).toEqual([['blocked', 10001]])
-    // 屏蔽只动屏蔽名单。若这里删了本地关注，下一次 mergeFromPocket 会把账号关注并回
-    // 本地（只增不删），形成「既屏蔽又关注」；而账号取关更是用户没点过的操作
     expect(calls.removeMemberFlag).toEqual([])
     expect(calls.pocketUnfollow).toEqual([])
     expect(store.isFollowed(10001)).toBe(true)
@@ -248,6 +266,7 @@ describe('屏蔽与关注正交（屏蔽不再连带取关）', () => {
 
   it('已屏蔽且账号侧已关注：点关注只解屏蔽，不重复写名单、不双写', async () => {
     const { store, blockedStore, actions, calls } = await setup({
+      pocketIds: [10001],
       loggedIn: true,
       flags: [{ userId: 10001, realName: '甲', teamColor: '' }],
       blockedFlags: [{ userId: 10001, realName: '甲', teamColor: '' }],
@@ -265,7 +284,7 @@ describe('屏蔽与关注正交（屏蔽不再连带取关）', () => {
     expect(store.isFollowed(10001)).toBe(true)
   })
 
-  it('已屏蔽且未关注：点关注解屏蔽并关注，照常双写口袋', async () => {
+  it('已屏蔽且未关注：点关注解屏蔽并关注，只写当前口袋账号', async () => {
     const { store, blockedStore, actions, calls } = await setup({
       loggedIn: true,
       blockedFlags: [{ userId: 10001, realName: '甲', teamColor: '' }],
@@ -276,10 +295,10 @@ describe('屏蔽与关注正交（屏蔽不再连带取关）', () => {
     await actions.toggleFollowMember(makeMember({ userId: 10001, realName: '甲' }))
 
     expect(calls.removeMemberFlag).toEqual([['blocked', 10001]])
-    expect(calls.addMemberFlag).toEqual([['followed', 10001]])
+    expect(calls.addMemberFlag).toEqual([])
     expect(calls.pocketFollow).toEqual([10001])
     expect(blockedStore.isBlocked(10001)).toBe(false)
-    expect(store.isFollowed(10001)).toBe(true)
+    expect(store.isFollowed(10001)).toBe(false)
   })
 
   it('解除屏蔽同样不动关注名单（关注始终由账号维度决定）', async () => {

@@ -23,7 +23,7 @@ const props = defineProps<{
   live: LiveListItem | null
   /** 口袋账号侧是否已关注（未登录 / 本地独有时为 false） */
   pocketFollowed?: boolean
-  /** 本机名单里是否已收录（local / both；账号关注的成员同步后也是 true） */
+  /** 本机名单里是否已收录（local / both） */
   localFollowed?: boolean
   /** 口袋关注 / 取关请求进行中 */
   pocketFollowBusy?: boolean
@@ -40,7 +40,6 @@ const emit = defineEmits<{ togglePocketFollow: [], toggleLocalFollow: [] }>()
  * 层级而不是并列：口袋关注是主操作，本机名单只作为状态呈现；
  * 「仅在本机关注 / 移出本机」这类次级操作放在状态行里，按状态决定是否出现。
  */
-const localOnly = computed(() => props.pocketFollowed !== true && props.localFollowed === true)
 /** 任一请求在途：两个入口互斥，避免并发改出来回跳的状态 */
 const followBusy = computed(() => props.pocketFollowBusy === true || props.localFollowBusy === true)
 const pocketDisabled = computed(() => props.pocketUnavailable === true || props.localFollowBusy === true)
@@ -243,25 +242,8 @@ function enterLive() {
         <template v-if="pocketUnavailable">
           关注状态未同步，稍后刷新再试
         </template>
-        <template v-else-if="pocketFollowed">
-          <span class="follow-state">已关注</span>
-          <span class="follow-dot">·</span>
-          {{ localFollowed ? '本机名单随账号同步' : '本机尚未收录，同步后出现' }}
-        </template>
-        <template v-else-if="localOnly">
-          <span class="follow-state">仅在本机关注</span>
-          <span class="follow-dot">·</span>
-          <button
-            type="button"
-            class="follow-text-btn"
-            :disabled="followBusy"
-            @click="emit('toggleLocalFollow')"
-          >
-            {{ localFollowBusy ? '移出中…' : '移出本机' }}
-          </button>
-        </template>
         <template v-else>
-          关注后会同步到口袋账号
+          <span class="follow-state">{{ localFollowed ? (pocketFollowed ? '本机已收藏' : '仅在本机关注') : '本机未收藏' }}</span>
           <span class="follow-dot">·</span>
           <button
             type="button"
@@ -269,7 +251,7 @@ function enterLive() {
             :disabled="followBusy"
             @click="emit('toggleLocalFollow')"
           >
-            {{ localFollowBusy ? '记录中…' : '仅在本机关注' }}
+            {{ localFollowed ? '移出本机' : '加入本机收藏' }}
           </button>
         </template>
       </p>

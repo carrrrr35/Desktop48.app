@@ -10,10 +10,10 @@ import CardSkeletonGrid from '@renderer/components/ui/skeleton/CardSkeletonGrid.
 import { useFollowedMemberEntries } from '@renderer/composables/use-followed-member-entries'
 import { useMemberDetail } from '@renderer/composables/use-member-detail'
 import { enrichLiveItem, usePagedLiveList } from '@renderer/composables/use-paged-live-list'
+import { useActiveFollows } from '@renderer/composables/use-pocket-follow'
 import Apis from '@renderer/services/apis'
 import EventBus from '@renderer/services/event-bus'
 import useFloatPlayersStore from '@renderer/stores/float-players'
-import { useFollowedMembersStore } from '@renderer/stores/member-flags'
 import { useMemberTreeStore } from '@renderer/stores/member-tree'
 import Constants from '@renderer/utils/constants'
 import { ElMessage } from 'element-plus'
@@ -36,7 +36,7 @@ const { memberTree, loadTree } = useMemberTreeStore()
 
 // 关注名单：与成员页 / 直播 tab 共用同一份（模块级单例），回放卡片据此打关注标识。
 // 回放是历史归档、且列表常带成员筛选，故只做标识不重排（重排会打乱时间倒序与筛选语义）
-const { refreshFollowedMembers, isFollowed } = useFollowedMembersStore()
+const { refreshFollowedMembers, isFollowed } = useActiveFollows()
 
 // 快速筛选条的头像条目：昵称 / 头像 / 队色由关注名单经成员名录反查得到
 const { entries: followedEntries } = useFollowedMemberEntries()

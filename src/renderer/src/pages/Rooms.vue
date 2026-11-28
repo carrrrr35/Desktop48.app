@@ -5,6 +5,7 @@
 import type { PocketRoom } from '@renderer/composables/use-pocket-rooms'
 import type { PocketRoomCopyKey, PocketRoomMessageView } from '@renderer/utils/pocket-room-message'
 import type { Component, ComponentPublicInstance } from 'vue'
+import { pocketAccountKey } from '@common/pocket-accounts'
 import { ArrowRight, Calendar, ChatDotRound, Check, Delete, DocumentCopy, Lock, Microphone, Picture, Refresh, StarFilled, VideoCamera } from '@element-plus/icons-vue'
 import RoomAlbum from '@renderer/components/rooms/RoomAlbum.vue'
 import RoomComposer from '@renderer/components/rooms/RoomComposer.vue'
@@ -13,16 +14,18 @@ import RoomEssenceDialog from '@renderer/components/rooms/RoomEssenceDialog.vue'
 import RoomListItem from '@renderer/components/rooms/RoomListItem.vue'
 import RoomLiveCard from '@renderer/components/rooms/RoomLiveCard.vue'
 import RoomMessageMenu from '@renderer/components/rooms/RoomMessageMenu.vue'
-import RoomProfileCard from '@renderer/components/rooms/RoomProfileCard.vue'
 
+import RoomProfileCard from '@renderer/components/rooms/RoomProfileCard.vue'
 import RoomVoiceBar from '@renderer/components/rooms/RoomVoiceBar.vue'
 import MediaIcon from '@renderer/components/ui/MediaIcon.vue'
 import PreviewImage from '@renderer/components/ui/PreviewImage.vue'
+import { setPocketFollow } from '@renderer/composables/use-pocket-follow'
 import { usePocketRooms } from '@renderer/composables/use-pocket-rooms'
 import { useUnreadSeenGuard } from '@renderer/composables/use-unread-seen'
 import { useMemberDirectoryStore } from '@renderer/stores/member-directory'
 import { useFollowedMembersStore } from '@renderer/stores/member-flags'
 import { useMemberTeamPromotionStore } from '@renderer/stores/member-team-promotion'
+import { pocketAuthState } from '@renderer/stores/pocket-auth'
 import { markRoomRead, unreadChannelOf, unreadCountOf } from '@renderer/stores/pocket-unread'
 import { useRoomPinsStore } from '@renderer/stores/room-pins'
 import { copyText } from '@renderer/utils/clipboard'
@@ -79,7 +82,6 @@ const {
   openTemporaryRoom,
   closeTemporaryRoom,
   applyRoomFollowSource,
-  notePocketFollow,
 
   loadMoreHistory,
   openSharedLive,
@@ -240,23 +242,15 @@ function isLocallyFollowed(source: PocketRoom['followSource']): boolean {
 const selectedPocketFollowed = computed(() => isPocketFollowed(selectedRoom.value?.followSource))
 const selectedLocalFollowed = computed(() => isLocallyFollowed(selectedRoom.value?.followSource))
 
-/**
- * 资料卡的两个关注开关。
- *
- * 口袋关注写账号（friends/id）并顺带补本机 flag；本地关注只写本机名单。
- * 两者不是对等的两份名单：账号关注按策略 A 只增不删地并进本机（见
- * stores/member-flags 的 mergeFromPocket），所以账号已关注时本地必然收录——
- * 本地开关这时锁定为开，只有「仅本地关注」的成员才能本地取关。
- * 两个来源都不再关注时，房间随条目移出左列（正看着则右侧收起）。
- */
+/** 口袋关注和本机收藏分别保存。 */
 const pocketFollowBusy = ref(false)
 const localFollowBusy = ref(false)
 
-/** 口袋关注开关：写账号并顺带补本机 flag；取消只动账号、保留本机记录（二次确认） */
 async function togglePocketFollow() {
   const room = selectedRoom.value
-  if (!room || pocketFollowBusy.value || localFollowBusy.value)
+  if (!room || loading.value || pocketFollowError.value || pocketFollowBusy.value || localFollowBusy.value)
     return
+  const owner = pocketAccountKey(pocketAuthState.value)
   const willFollow = !selectedPocketFollowed.value
   // 本地状态在 await 前截下：回包期间可能已切房
   const keepLocal = selectedLocalFollowed.value
@@ -277,27 +271,14 @@ async function togglePocketFollow() {
   }
   pocketFollowBusy.value = true
   try {
-    if (willFollow) {
-      await window.mainAPI.pocketFollowMember(room.userId)
-      // 先更新口袋镜像再写本地：本地 store 的变化会触发来源 watch，此时镜像须已是最新
-      notePocketFollow(room.userId, true)
-      const localOk = await followMember({ userId: room.userId, realName: room.nickname, teamColor: room.teamColor })
-      applyRoomFollowSource(room.userId, localOk ? 'both' : 'pocket')
-      trackRoomFollow('follow', 'pocket')
-      ElMessage({
-        message: localOk ? '已关注（口袋账号 + 本机）' : '已关注口袋账号，本机记录同步失败',
-        type: localOk ? 'success' : 'warning',
-      })
+    if (!await setPocketFollow(room.userId, willFollow, owner))
       return
-    }
-    await window.mainAPI.pocketUnfollowMember(room.userId)
-    notePocketFollow(room.userId, false)
-    applyRoomFollowSource(room.userId, keepLocal ? 'local' : undefined)
-    trackRoomFollow('unfollow', 'pocket')
-    ElMessage({
-      message: keepLocal ? '已取消口袋关注，本地关注保留' : '已取消关注，房间已移出列表',
-      type: 'success',
-    })
+    if (willFollow)
+      applyRoomFollowSource(room.userId, keepLocal ? 'both' : 'pocket')
+    else
+      applyRoomFollowSource(room.userId, keepLocal ? 'local' : undefined)
+    trackRoomFollow(willFollow ? 'follow' : 'unfollow', 'pocket')
+    ElMessage.success(willFollow ? '已在口袋账号关注' : '已取消口袋关注')
   }
   catch (error) {
     trackRoomFollow(willFollow ? 'follow' : 'unfollow', 'pocket', true)
@@ -309,14 +290,13 @@ async function togglePocketFollow() {
   }
 }
 
-/**
- * 本地关注开关：只动本机名单。口袋已关注时锁定（见上），这里再守一道，
- * 免得按钮态与服务端不同步时把同步会补回来的记录删掉。
- */
+/** 本机收藏可跨账号使用。 */
 async function toggleLocalFollow() {
   const room = selectedRoom.value
-  if (!room || localFollowBusy.value || pocketFollowBusy.value || selectedPocketFollowed.value)
+  if (!room || localFollowBusy.value || pocketFollowBusy.value || loading.value)
     return
+  const owner = pocketAccountKey(pocketAuthState.value)
+  const inPocket = selectedPocketFollowed.value
   const willFollow = !selectedLocalFollowed.value
   localFollowBusy.value = true
   try {
@@ -327,7 +307,8 @@ async function toggleLocalFollow() {
         ElMessage.error('本地关注失败，请稍后重试')
         return
       }
-      applyRoomFollowSource(room.userId, 'local')
+      if (owner === pocketAccountKey(pocketAuthState.value))
+        applyRoomFollowSource(room.userId, inPocket ? 'both' : 'local')
       ElMessage({ message: '已在本机关注该成员', type: 'success' })
       return
     }
@@ -337,8 +318,9 @@ async function toggleLocalFollow() {
       ElMessage.error('本地取关失败，请稍后重试')
       return
     }
-    applyRoomFollowSource(room.userId, undefined)
-    ElMessage({ message: '已移出本机，房间不再显示', type: 'success' })
+    if (owner === pocketAccountKey(pocketAuthState.value))
+      applyRoomFollowSource(room.userId, inPocket ? 'pocket' : undefined)
+    ElMessage({ message: '已移出本机收藏', type: 'success' })
   }
   finally {
     localFollowBusy.value = false
@@ -2302,7 +2284,7 @@ watch([chatStatus, chatStatusText], () => {
                 :local-followed="selectedLocalFollowed"
                 :pocket-follow-busy="pocketFollowBusy"
                 :local-follow-busy="localFollowBusy"
-                :pocket-unavailable="!!pocketFollowError"
+                :pocket-unavailable="loading || !!pocketFollowError"
                 @toggle-pocket-follow="togglePocketFollow"
                 @toggle-local-follow="toggleLocalFollow"
               />
