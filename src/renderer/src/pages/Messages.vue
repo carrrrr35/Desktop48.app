@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { PocketConversation, PocketDirectMessage } from '@preload/ipc-contract'
 import { ArrowRight, ChatDotRound, Message, Refresh } from '@element-plus/icons-vue'
+import RoomVoiceBar from '@renderer/components/rooms/RoomVoiceBar.vue'
+import MessageVideo from '@renderer/components/ui/MessageVideo.vue'
 import { usePocketMessages } from '@renderer/composables/use-pocket-messages'
 import { useSettingsNav } from '@renderer/composables/use-settings-nav'
 import { pocketAccountKey, pocketAuthState, refreshPocketAuthState } from '@renderer/stores/pocket-auth'
@@ -237,6 +239,8 @@ function isOutgoing(message: PocketDirectMessage) {
                     {{ message.text }}
                   </p>
                   <img v-if="message.image" :src="Tools.sourceUrl(message.image)" alt="聊天图片" referrerpolicy="no-referrer">
+                  <RoomVoiceBar v-if="message.audio" :src="message.audio.url" :initial-duration="message.audio.duration" />
+                  <MessageVideo v-if="message.video" class="chat-video" :src="message.video.url" :poster="message.video.poster" />
                 </div>
               </li>
             </ol>
@@ -259,6 +263,7 @@ function isOutgoing(message: PocketDirectMessage) {
 
 .messages-page {
   --tile-color: var(--color-messages);
+  --voice-color: var(--color-messages);
   --message-pad: #{fluid(12px, 16px)};
 
   display: flex;
@@ -457,6 +462,10 @@ time {
     max-height: 240px;
     border-radius: var(--radius-sm);
     object-fit: contain;
+  }
+
+  p + .chat-video {
+    margin-top: 6px;
   }
 }
 

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// 房间语音条：播放/暂停 + 进度条 + 时长，样式同微信语音条。同时只允许一条在播（占位见 utils/voice-solo.ts）。
+// 房间与消息页共用的语音条，同时只允许一条在播（见 utils/voice-solo.ts）。
 import MediaIcon from '@renderer/components/ui/MediaIcon.vue'
 import { claimVoiceSlot, releaseVoiceSlot } from '@renderer/utils/voice-solo'
 import { onDeactivated, onUnmounted, ref, watch } from 'vue'
 
-const props = defineProps<{ src: string }>()
+const props = defineProps<{ src: string, initialDuration?: number }>()
 
 const playing = ref(false)
 const current = ref(0)
@@ -118,13 +118,15 @@ onUnmounted(() => {
     <span class="voice-bar__track" @click.stop="seek($event)">
       <span class="voice-bar__fill" :style="{ width: duration ? `${(current / duration) * 100}%` : '0%' }" />
     </span>
-    <span class="voice-bar__time">{{ timeText(playing || current ? current : duration) }}</span>
+    <span class="voice-bar__time">{{ timeText(playing || current ? current : duration || initialDuration || 0) }}</span>
   </div>
   <span v-else class="voice-bar__failed">[语音加载失败]</span>
 </template>
 
 <style scoped lang="scss">
 .voice-bar {
+  --voice-bar-color: var(--voice-color, var(--color-rooms));
+
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -134,11 +136,11 @@ onUnmounted(() => {
   border-radius: var(--msg-radius, 10px);
   cursor: pointer;
   user-select: none;
-  background: color-mix(in srgb, var(--color-rooms) 10%, transparent);
+  background: color-mix(in srgb, var(--voice-bar-color) 10%, transparent);
   transition: background 0.15s ease;
 
   &:hover {
-    background: color-mix(in srgb, var(--color-rooms) 16%, transparent);
+    background: color-mix(in srgb, var(--voice-bar-color) 16%, transparent);
   }
 }
 
@@ -151,7 +153,7 @@ onUnmounted(() => {
   height: 24px;
   border-radius: 50%;
   color: #fff;
-  background: var(--color-rooms);
+  background: var(--voice-bar-color);
 }
 
 .voice-bar__track {
@@ -160,14 +162,14 @@ onUnmounted(() => {
   height: 4px;
   border-radius: 2px;
   cursor: pointer;
-  background: color-mix(in srgb, var(--color-rooms) 18%, transparent);
+  background: color-mix(in srgb, var(--voice-bar-color) 18%, transparent);
 }
 
 .voice-bar__fill {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 2px;
-  background: var(--color-rooms);
+  background: var(--voice-bar-color);
 }
 
 .voice-bar__time {

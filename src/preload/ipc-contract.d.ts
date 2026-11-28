@@ -57,6 +57,8 @@ export interface PocketDirectMessage {
   senderIsClub: boolean
   text: string
   image: string
+  audio?: { url: string, duration: number }
+  video?: { url: string, poster?: string }
   timestamp: number
 }
 

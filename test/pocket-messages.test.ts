@@ -89,6 +89,67 @@ describe('消息页签的只读接口', () => {
     ])
   })
 
+  it('把语音 JSON 转为会话提示和可播放的聊天附件', async () => {
+    const url = 'https://mp4-new1.48.cn/2026/1125/voice.aac'
+    const audio = { url, duration: 58, size: 190302 }
+    const wrapped = JSON.stringify({ ...audio, url: `[${url}](${url})` })
+    const other = JSON.stringify({ ...audio, url: url.replace('.aac', '.jpg') })
+    core.postPocket.mockResolvedValueOnce({ status: 200, content: { data: [
+      { conversationId: 100, newestMessage: wrapped },
+      { conversationId: 101, newestMessage: other },
+    ], lastTime: 0 } })
+    core.postPocket.mockResolvedValueOnce({ status: 200, content: { data: [
+      { content: { text: wrapped } },
+      { messageType: 'AUDIO', content: { text: JSON.stringify(audio) } },
+      { messageType: 'AUDIO', content: { url: '/2026/1125/voice.aac', duration: '58' } },
+      { messageType: 'AUDIO', content: { url: 'javascript:alert(1)' } },
+      { messageType: 'FLIPCARD_ANSWER', content: { answerType: 2, text: wrapped } },
+      { messageType: 'TEXT', content: { text: other } },
+    ], lastTime: 0 } })
+
+    const sessions = await getConversations()
+    expect(sessions.items.map(row => row.preview)).toEqual(['[语音消息]', other])
+    const result = await getConversationMessages('200')
+    const attachment = { url, duration: 58 }
+    expect(result.items.map(row => [row.text, row.audio])).toEqual([
+      ['', attachment],
+      ['', attachment],
+      ['', { ...attachment, url: 'https://mp4.48.cn/2026/1125/voice.aac' }],
+      ['[语音消息不可播放]', undefined],
+      ['[翻牌回答·语音]', attachment],
+      [other, undefined],
+    ])
+  })
+
+  it('识别普通视频和视频翻牌，保留普通链接及独立说明', async () => {
+    const url = 'https://mp4-new1.48.cn/2026/1125/video.MP4?token=sample'
+    const media = JSON.stringify({ url, previewImg: '/2026/1125/cover.jpg' })
+    const signed = 'https://mp4-new1.48.cn/playback?id=sample'
+    core.postPocket.mockResolvedValueOnce({ status: 200, content: { data: [
+      { conversationId: 100, newestMessage: media },
+      { conversationId: 101, newestMessage: url },
+    ], lastTime: 0 } })
+    core.postPocket.mockResolvedValueOnce({ status: 200, content: { data: [
+      { messageType: 'TEXT', content: { text: media } },
+      { messageType: 'VIDEO', content: { text: '视频说明', videoInfo: { playUrl: '/2026/1125/video.mp4' } } },
+      { messageType: 'FLIPCARD_ANSWER', content: { answerType: '3', text: JSON.stringify({ url: signed, cover: 'file:///cover.jpg' }) } },
+      { messageType: 'TEXT', content: { text: url } },
+      { messageType: 'VIDEO', content: { url: 'https://example.com/video.mp4' } },
+    ], lastTime: 0 } })
+
+    const sessions = await getConversations()
+    expect(sessions.items.map(row => row.preview)).toEqual(['[视频消息]', url])
+    const result = await getConversationMessages('200')
+    expect(result.items.every(row => !row.audio)).toBe(true)
+    expect(result.items.map(row => [row.text, row.video])).toEqual([
+      ['', { url, poster: 'https://source.48.cn/2026/1125/cover.jpg' }],
+      ['视频说明', { url: 'https://mp4.48.cn/2026/1125/video.mp4' }],
+      ['[翻牌回答·视频]', { url: signed }],
+      [url, undefined],
+      ['[视频消息不可播放]', undefined],
+    ])
+  })
+
   it('区分用户与俱乐部发送者，媒体翻牌使用类型提示，文字翻牌保留原文', async () => {
     const user = { userId: 123, nickName: '用户' }
     const club = { clubId: 456, clubName: '俱乐部' }
